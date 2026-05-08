@@ -245,9 +245,10 @@ function drawCoverTiled(ctx, img, x, y, w, h) {
 function drawStars(ctx, stars, scroll, theme, beatFlash) {
   ctx.save();
   ctx.fillStyle = '#ffffff';
+  const twinkle = CONFIG.performance.lowFx ? 0 : scroll * 0.02;
   for (const star of stars) {
     const x = wrap(star.x - scroll * 0.35 * star.depth, CONFIG.W);
-    const alpha = clamp(0.36 + Math.sin(star.tw + scroll * 0.02) * 0.28 + beatFlash * 0.28, 0.1, 1);
+    const alpha = clamp(0.36 + Math.sin(star.tw + twinkle) * 0.2 + beatFlash * 0.2, 0.1, 1);
     ctx.globalAlpha = alpha;
     if (!CONFIG.performance.lowFx) {
       ctx.shadowColor = theme.primary;
@@ -267,7 +268,7 @@ function drawParallaxShapes(ctx, shapes, scroll, theme, beatFlash) {
     const x = wrap(shape.x - scroll * shape.layer, CONFIG.W + shape.size * 2) - shape.size;
     ctx.save();
     ctx.translate(x, shape.y);
-    ctx.rotate(shape.rot + scroll * 0.002 * shape.layer);
+    ctx.rotate(CONFIG.performance.lowFx ? shape.rot : shape.rot + scroll * 0.002 * shape.layer);
     ctx.globalAlpha = 0.18 + beatFlash * 0.22;
     ctx.strokeStyle = theme.primary;
     ctx.shadowColor = theme.primary;

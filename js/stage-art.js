@@ -2,7 +2,7 @@ import { CONFIG, clamp } from './config.js';
 
 export function createStageArt() {
   return {
-    sparks: Array.from({ length: 34 }, (_, i) => ({
+    sparks: Array.from({ length: CONFIG.performance.sparks }, (_, i) => ({
       x: Math.random() * CONFIG.W,
       y: 26 + Math.random() * (CONFIG.GROUND_Y - 62),
       size: 2 + Math.random() * 5,
@@ -10,9 +10,25 @@ export function createStageArt() {
       phase: Math.random() * Math.PI * 2,
       hot: i % 3 === 0,
     })),
-    teeth: Array.from({ length: 30 }, (_, i) => ({
-      x: i * 32 - 18,
+    bossShards: Array.from({ length: CONFIG.performance.bossShards }, (_, i) => ({
+      x: Math.random() * CONFIG.W,
+      y: 32 + Math.random() * (CONFIG.GROUND_Y - 78),
+      w: 4 + (i % 4) * 3,
+      h: 4 + (i % 3) * 5,
+      speed: 0.9 + Math.random() * 1.8,
+      phase: Math.random() * Math.PI * 2,
+      spin: (Math.random() - 0.5) * 0.035,
+      hot: i % 2 === 0,
+    })),
+    teeth: Array.from({ length: CONFIG.performance.caveTeeth }, (_, i) => ({
+      x: i * 48 - 18,
       h: 14 + ((i * 17) % 34),
+    })),
+    hexMarks: Array.from({ length: 16 }, (_, i) => ({
+      x: Math.random() * CONFIG.W,
+      y: 70 + Math.random() * (CONFIG.GROUND_Y - 145),
+      size: 28 + (i % 4) * 10,
+      speed: 0.16 + (i % 3) * 0.12,
     })),
     portals: [
       { x: 520, y: 206, r: 34, tone: '#ffd13b' },
@@ -23,9 +39,11 @@ export function createStageArt() {
 
 export function drawStageBack(ctx, art, level, theme, scroll, beatFlash, frame) {
   drawDeepVignette(ctx, level, theme, beatFlash);
-  drawHexBand(ctx, level, theme, scroll);
+  drawHexBand(ctx, art, level, theme, scroll);
+  drawBossHazardBands(ctx, level, theme, scroll, beatFlash, frame);
   drawBossBackdrop(ctx, level, theme, beatFlash, frame);
-  drawSparks(ctx, art.sparks, level, theme, scroll, frame);
+  drawSparks(ctx, art.sparks, level, theme, scroll, beatFlash, frame);
+  drawBossShardStorm(ctx, art.bossShards, level, theme, scroll, beatFlash, frame);
   drawPortals(ctx, art.portals, level, theme, scroll, beatFlash, frame);
 }
 
@@ -47,18 +65,31 @@ function drawDeepVignette(ctx, level, theme, beatFlash) {
 
   if (beatFlash > 0.02) {
     ctx.globalAlpha = beatFlash * 0.12;
-    ctx.fillStyle = level.index >= 3 ? '#ff0000' : theme.primary;
+    ctx.fillStyle = level.index >= 2 ? '#ff0000' : theme.primary;
     ctx.fillRect(0, 0, CONFIG.W, CONFIG.H);
   }
   ctx.restore();
 }
 
-function drawHexBand(ctx, level, theme, scroll) {
+function drawHexBand(ctx, art, level, theme, scroll) {
   if (level.index < 1) return;
   ctx.save();
   ctx.globalAlpha = 0.14 + level.index * 0.035;
   ctx.strokeStyle = theme.accent;
   ctx.lineWidth = 2;
+
+  if (CONFIG.performance.lowFx) {
+    const count = level.index >= 2 ? 10 : 12;
+    for (let i = 0; i < Math.min(count, art.hexMarks.length); i++) {
+      const mark = art.hexMarks[i];
+      const x = wrap(mark.x - scroll * mark.speed, CONFIG.W + mark.size * 2) - mark.size;
+      polygon(ctx, x, mark.y, mark.size, 6);
+      ctx.stroke();
+    }
+    ctx.restore();
+    return;
+  }
+
   const size = 26;
   const stepX = size * 1.55;
   const stepY = size * 1.34;
@@ -79,10 +110,10 @@ function drawBossBackdrop(ctx, level, theme, beatFlash, frame) {
   ctx.save();
   const cx = CONFIG.W * 0.52;
   const cy = CONFIG.GROUND_Y + 84;
-  const scale = level.index === 3 ? 1.16 : 0.96;
+  const scale = level.index >= 2 ? 1.16 : 0.96;
   const pulse = 1 + beatFlash * 0.04 + Math.sin(frame * 0.025) * 0.015;
 
-  ctx.globalAlpha = level.index === 3 ? 0.7 : 0.45;
+  ctx.globalAlpha = level.index >= 2 ? 0.7 : 0.45;
   ctx.translate(cx, cy);
   ctx.scale(scale * pulse, scale * pulse);
 
@@ -92,7 +123,7 @@ function drawBossBackdrop(ctx, level, theme, beatFlash, frame) {
   bodyGrad.addColorStop(1, 'rgba(0,0,0,0.08)');
   ctx.fillStyle = bodyGrad;
   ctx.shadowColor = theme.accent;
-  ctx.shadowBlur = CONFIG.performance.lowFx ? 10 : 28;
+  ctx.shadowBlur = CONFIG.performance.lowFx ? 0 : 28;
 
   ctx.beginPath();
   ctx.moveTo(-230, 74);
@@ -129,22 +160,92 @@ function drawBossEye(ctx, x, y, theme, beatFlash) {
   ctx.fill();
   ctx.fillStyle = '#ffdf75';
   ctx.shadowColor = theme.primary;
-  ctx.shadowBlur = 8 + beatFlash * 12;
+  ctx.shadowBlur = CONFIG.performance.lowFx ? 4 + beatFlash * 4 : 8 + beatFlash * 12;
   ctx.beginPath();
   ctx.ellipse(0, 0, 11 + beatFlash * 4, 8 + beatFlash * 3, 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
 }
 
-function drawSparks(ctx, sparks, level, theme, scroll, frame) {
-  if (level.index < 1) return;
+function drawBossHazardBands(ctx, level, theme, scroll, beatFlash, frame) {
+  if (level.index < 2) return;
   ctx.save();
-  for (const spark of sparks) {
-    const x = wrap(spark.x - scroll * spark.speed, CONFIG.W + 18) - 9;
-    const alpha = clamp(0.25 + Math.sin(frame * 0.06 + spark.phase) * 0.22 + level.index * 0.08, 0.08, 0.86);
+  ctx.globalAlpha = 0.16 + beatFlash * 0.18;
+  ctx.strokeStyle = theme.primary;
+  ctx.lineWidth = 2;
+  ctx.shadowColor = theme.primary;
+  ctx.shadowBlur = CONFIG.performance.lowFx ? 0 : 16;
+
+  const bands = CONFIG.performance.lowFx ? 3 : 5;
+  for (let i = 0; i < bands; i++) {
+    const x = wrap(i * 190 - scroll * 0.18 + Math.sin(frame * 0.018 + i) * 18, CONFIG.W + 260) - 130;
+    ctx.beginPath();
+    ctx.moveTo(x, 38 + i * 24);
+    ctx.lineTo(x + 260, 8 + i * 10);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawSparks(ctx, sparks, level, theme, scroll, beatFlash, frame) {
+  ctx.save();
+  const count =
+    level.index >= 2
+      ? CONFIG.performance.bossSparks
+      : level.index === 1
+        ? CONFIG.performance.normalSparks
+        : CONFIG.performance.starterSparks;
+  const speedBoost = level.index >= 2 ? 1.42 : level.index === 1 ? 1.04 : 0.82;
+  const baseAlpha = level.index >= 2 ? 0.34 : level.index === 1 ? 0.22 : 0.18;
+  const waveAlpha = level.index >= 2 ? 0.34 : 0.16;
+
+  if (level.index >= 2 && !CONFIG.performance.lowFx) {
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.shadowColor = theme.primary;
+    ctx.shadowBlur = 12;
+  }
+
+  for (let i = 0; i < Math.min(count, sparks.length); i++) {
+    const spark = sparks[i];
+    const x = wrap(spark.x - scroll * spark.speed * speedBoost, CONFIG.W + 24) - 12;
+    const y = spark.y + Math.sin(frame * 0.045 + spark.phase) * (level.index >= 2 ? 9 : 3);
+    const alpha = clamp(baseAlpha + Math.sin(frame * 0.06 + spark.phase) * waveAlpha + beatFlash * 0.16, 0.06, 1);
+    const size = spark.size * (level.index >= 2 ? 1.1 : level.index === 1 ? 0.86 : 0.68);
     ctx.globalAlpha = alpha;
-    ctx.fillStyle = spark.hot ? '#ff2d1a' : theme.accent;
-    ctx.fillRect(x, spark.y, spark.size, spark.size);
+    ctx.fillStyle =
+      level.index >= 2
+        ? spark.hot ? '#ff2010' : theme.accent
+        : spark.hot ? theme.primary : theme.accent;
+
+    if (level.index >= 2 && i % 4 === 0) ctx.fillRect(x, y, size * 4.2, Math.max(2, size * 0.8));
+    else ctx.fillRect(x, y, size, size);
+  }
+  ctx.restore();
+}
+
+function drawBossShardStorm(ctx, shards, level, theme, scroll, beatFlash, frame) {
+  if (level.index < 2) return;
+  ctx.save();
+  if (!CONFIG.performance.lowFx) {
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.shadowColor = theme.primary;
+    ctx.shadowBlur = 16;
+  }
+
+  for (const shard of shards) {
+    const x = wrap(shard.x - scroll * shard.speed, CONFIG.W + 80) - 40;
+    const y = wrap(shard.y + Math.sin(frame * 0.05 + shard.phase) * 18, CONFIG.GROUND_Y - 32);
+    ctx.globalAlpha = clamp(0.34 + Math.sin(frame * 0.07 + shard.phase) * 0.28 + beatFlash * 0.2, 0.12, 0.95);
+    ctx.fillStyle = shard.hot ? '#ff2600' : theme.primary;
+    if (CONFIG.performance.lowFx) {
+      ctx.fillRect(x - shard.w, y - shard.h / 2, shard.w * 2.3, Math.max(3, shard.h * 0.7));
+    } else {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(shard.phase + frame * shard.spin);
+      ctx.fillRect(-shard.w / 2, -shard.h / 2, shard.w, shard.h);
+      ctx.restore();
+    }
   }
   ctx.restore();
 }
@@ -168,7 +269,7 @@ function drawPortal(ctx, x, y, r, tone, theme, beatFlash, frame) {
   ctx.strokeStyle = '#ffffff';
   ctx.lineWidth = 4;
   ctx.shadowColor = tone;
-  ctx.shadowBlur = CONFIG.performance.lowFx ? 7 : 20;
+  ctx.shadowBlur = CONFIG.performance.lowFx ? 3 : 20;
   ctx.beginPath();
   ctx.ellipse(0, 0, r * 0.72, r, 0, 0, Math.PI * 2);
   ctx.stroke();
@@ -180,8 +281,9 @@ function drawPortal(ctx, x, y, r, tone, theme, beatFlash, frame) {
   ctx.stroke();
 
   ctx.fillStyle = `${theme.primary}aa`;
-  for (let i = 0; i < 12; i++) {
-    const a = (i / 12) * Math.PI * 2 + frame * 0.05;
+  const particleCount = CONFIG.performance.lowFx ? 6 : 12;
+  for (let i = 0; i < particleCount; i++) {
+    const a = (i / particleCount) * Math.PI * 2 + frame * 0.05;
     ctx.fillRect(Math.cos(a) * r * 0.9 - 2, Math.sin(a) * r * 1.14 - 2, 4, 4);
   }
   ctx.restore();
@@ -191,8 +293,8 @@ function drawCaveSilhouette(ctx, teeth, level, theme, scroll, beatFlash) {
   if (level.index < 1) return;
   ctx.save();
   ctx.fillStyle = '#020202';
-  ctx.shadowColor = level.index === 3 ? '#ff1f1f' : theme.accent;
-  ctx.shadowBlur = CONFIG.performance.lowFx ? 7 : 22;
+  ctx.shadowColor = level.index >= 2 ? '#ff1f1f' : theme.accent;
+  ctx.shadowBlur = CONFIG.performance.lowFx ? 0 : 22;
 
   const topBase = 18 + level.index * 9;
   ctx.beginPath();
@@ -208,7 +310,7 @@ function drawCaveSilhouette(ctx, teeth, level, theme, scroll, beatFlash) {
   ctx.closePath();
   ctx.fill();
 
-  if (level.index >= 3) {
+  if (level.index >= 2) {
     ctx.globalAlpha = 0.72 + beatFlash * 0.2;
     ctx.fillStyle = '#0a0000';
     ctx.beginPath();
@@ -233,7 +335,7 @@ function drawSpeedArrows(ctx, level, theme, scroll, frame) {
   const y = 206 + Math.sin(frame * 0.05) * 5;
   if (x > -120 && x < CONFIG.W + 120) {
     ctx.shadowColor = theme.accent;
-    ctx.shadowBlur = CONFIG.performance.lowFx ? 8 : 20;
+    ctx.shadowBlur = CONFIG.performance.lowFx ? 3 : 20;
     for (let i = 0; i < 3; i++) {
       drawArrow(ctx, x + i * 25, y, theme.accent, '#ffffff');
     }

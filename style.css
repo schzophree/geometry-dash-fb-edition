@@ -52,8 +52,9 @@ button {
   height: 100vh;
   touch-action: none;
   image-rendering: auto;
-  border: 2px solid rgba(255, 255, 255, 0.2);
-  box-shadow: 0 0 28px rgba(0, 212, 255, 0.32);
+  border: 0;
+  outline: 0;
+  box-shadow: none;
   background: #040d28;
 }
 

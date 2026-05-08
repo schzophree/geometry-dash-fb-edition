@@ -88,6 +88,18 @@ function drawLives(ctx, lives, checkpointActive) {
   ctx.textAlign = 'left';
   ctx.textBaseline = 'bottom';
   ctx.font = 'bold 20px Pusab, Arial';
+
+  if (CONFIG.gameplay.oneHitKill) {
+    if (checkpointActive) {
+      ctx.fillStyle = '#ffffff';
+      ctx.shadowColor = '#ffffff';
+      ctx.shadowBlur = 8;
+      ctx.fillText('CP', 16, CONFIG.H - 16);
+    }
+    ctx.restore();
+    return;
+  }
+
   ctx.shadowColor = '#ff4488';
   ctx.shadowBlur = 12;
   const liveText = lives > 8 ? `❤️ ×${lives}` : '❤️'.repeat(Math.max(0, lives));

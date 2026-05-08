@@ -41,7 +41,8 @@ music/
 
 1. Download GD spritesheets atau cek folder `gd-assets\assets`, lalu taruh `GJ_GameSheet-hd.png` dan `GJ_GameSheet02-hd.png` di `assets\sprites\`. Game tetap jalan tanpa sprite karena ada Canvas fallback.
 2. Taruh MP3 di `music\` atau `assets\audio\bgm\`, lalu edit `music-list.js`.
-3. Background opsional: `assets\backgrounds\bg_0.png` sampai `bg_3.png`, dan `assets\backgrounds\ground.png`.
+3. Background opsional: `assets\backgrounds\bg_0.png` sampai `bg_2.png`, dan `assets\backgrounds\ground.png`.
+4. SFX boss checkpoint dipakai dari `geometry-dash-assets\warning-alarm-not-loud.mp3` dan `geometry-dash-assets\incoming-tears.mp3`.
 
 ## Kontrol
 
@@ -52,14 +53,21 @@ music/
 
 ## Fitur
 
-- 4 level visual theme dengan transisi score `900`, `2100`, dan `3800`
+- 3 level sesuai 3 lagu default, dengan checkpoint/transisi di score `900` dan `2100`
 - Canvas dibuat full viewport browser
 - Level baru hanya aktif setelah score threshold tercapai dan lagu level aktif selesai minimal sekali
 - Checkpoint sesi saat transisi level, tanpa `localStorage`
 - Resume dari checkpoint di layar game over
-- Heart item random yang menambah nyawa tanpa batas maksimum
-- Invincible 90 frame setelah kena obstacle atau tertangkap Facebook
+- Mode GD asli: 1-hit kill aktif lewat `CONFIG.gameplay.oneHitKill`
+- Heart item dan sistem nyawa lama otomatis nonaktif saat `oneHitKill` aktif
 - Missing assets memakai fallback Canvas
 - Audio lazy-load per level agar startup lebih ringan; missing music memakai synthesized EDM beat dari Web Audio API
+- SFX layered saat masuk checkpoint BOSS
+- Efek game over muffled/high-cut saat nyawa habis
 - Font utama memakai `assets/fonts/pusab.otf`, gaya font yang sama dengan default GDColon/GD Browser
 - Gameplay memakai layer boss-stage Canvas: hex wall, portal ring, speed arrows, cave silhouette, red sparks, dan boss backdrop untuk level berat
+- Mode low-FX aktif di `CONFIG.performance.lowFx` supaya lebih ringan di CPU lama
+- Menu/awal level punya ambient sparks ringan; level BOSS punya shard storm dan hazard bands versi brutal-ringan
+- Transisi level memakai flash + wipe neon singkat saat checkpoint level baru aktif
+- Level BOSS memakai manual mapping di `js/level-data.js`, Boss Manager di `js/boss.js`, dan sinkron ke `audio.currentTime()`
+- Boss Cyber-Demon FB memakai crop sprite dari `GJ_GameSheet02-hd.png` jika spritesheet tersedia

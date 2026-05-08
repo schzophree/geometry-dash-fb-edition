@@ -22,21 +22,26 @@ export class ObstacleManager {
     this.nextHeart = randInt(CONFIG.heart.spawnMin, CONFIG.heart.spawnMax);
   }
 
-  update(dt, level, gameSpeed, obInterval, playerHitbox, frame) {
+  update(dt, level, gameSpeed, obInterval, playerHitbox, frame, options = {}) {
+    const spawnObstacles = options.spawnObstacles !== false;
     this.spawnTimer += dt;
-    if (this.spawnTimer >= obInterval) {
+    if (spawnObstacles && this.spawnTimer >= obInterval) {
       this.spawnPattern(level);
+      this.spawnTimer = 0;
+    } else if (!spawnObstacles) {
       this.spawnTimer = 0;
     }
 
     for (const obs of this.obstacles) obs.x -= gameSpeed * dt;
     this.obstacles = this.obstacles.filter((obs) => obs.x + obs.w > -80);
 
-    this.heartTimer += dt;
-    if (this.heartTimer >= this.nextHeart) {
-      this.spawnHeart();
-      this.heartTimer = 0;
-      this.nextHeart = randInt(CONFIG.heart.spawnMin, CONFIG.heart.spawnMax);
+    if (!CONFIG.gameplay.oneHitKill) {
+      this.heartTimer += dt;
+      if (this.heartTimer >= this.nextHeart) {
+        this.spawnHeart();
+        this.heartTimer = 0;
+        this.nextHeart = randInt(CONFIG.heart.spawnMin, CONFIG.heart.spawnMax);
+      }
     }
 
     for (const heart of this.hearts) {

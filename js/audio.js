@@ -5,11 +5,13 @@ export class AudioEngine {
     this.musicList = Array.isArray(musicList) ? musicList : [];
     this.ctx = null;
     this.master = null;
+    this.fxFilter = null;
     this.analyser = null;
     this.dataArray = null;
     this.source = null;
     this.currentIndex = 0;
     this.buffers = new Map();
+    this.sfxBuffers = new Map();
     this.startedAt = 0;
     this.pauseOffset = 0;
     this.playing = false;
@@ -20,6 +22,7 @@ export class AudioEngine {
     this.history = new Float32Array(43).fill(0);
     this.historyIdx = 0;
     this.lastBeatTime = 0;
+    this.lastAnalysisTime = 0;
     this.noiseBuffer = null;
     this.syntheticDuration = 90;
   }
@@ -37,9 +40,16 @@ export class AudioEngine {
     this.master.gain.value = this.muted ? 0 : CONFIG.audio.volume;
     this.master.connect(this.ctx.destination);
 
+    this.fxFilter = this.ctx.createBiquadFilter();
+    this.fxFilter.type = 'lowpass';
+    this.fxFilter.frequency.value = 20000;
+    this.fxFilter.Q.value = 0.7;
+
     this.analyser = this.ctx.createAnalyser();
     this.analyser.fftSize = 1024;
     this.analyser.smoothingTimeConstant = 0.85;
+    this.fxFilter.connect(this.analyser);
+    this.analyser.connect(this.master);
     this.dataArray = new Uint8Array(this.analyser.frequencyBinCount);
     this.noiseBuffer = this.createNoiseBuffer();
     return this.ctx;
@@ -48,6 +58,7 @@ export class AudioEngine {
   async preload(onProgress = () => {}) {
     this.ensureContext();
     console.log('[audio] lazy loading enabled; music decodes when a level starts');
+    await this.preloadSfx();
     onProgress(1);
   }
 
@@ -84,6 +95,30 @@ export class AudioEngine {
       set.add(`music/${file.split('/').pop()}`);
     }
     return [...set];
+  }
+
+  async preloadSfx() {
+    const sfxList = CONFIG.audio.bossCheckpointSfx || [];
+    await Promise.all(sfxList.map((entry) => this.loadSfx(entry.name, entry.file)));
+  }
+
+  async loadSfx(name, file) {
+    if (!name || !file || !this.ctx) return null;
+    if (this.sfxBuffers.has(name)) return this.sfxBuffers.get(name);
+
+    try {
+      console.log(`[audio] fetching sfx ${file}`);
+      const response = await fetch(file);
+      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+      const arrayBuffer = await response.arrayBuffer();
+      const decoded = await this.ctx.decodeAudioData(arrayBuffer);
+      this.sfxBuffers.set(name, decoded);
+      console.log(`[audio] loaded sfx ${name}`);
+      return decoded;
+    } catch (err) {
+      console.log(`[audio] could not load sfx ${file}: ${err.message}`);
+      return null;
+    }
   }
 
   async unlock() {
@@ -126,8 +161,7 @@ export class AudioEngine {
     this.source = ctx.createBufferSource();
     this.source.buffer = buffer;
     this.source.loop = false;
-    this.source.connect(this.analyser);
-    this.source.connect(this.master);
+    this.source.connect(this.fxFilter || this.master);
     const safeOffset = buffer.duration ? offset % buffer.duration : 0;
     this.source.start(0, safeOffset);
     this.startedAt = ctx.currentTime - safeOffset;
@@ -180,6 +214,7 @@ export class AudioEngine {
     this.playing = false;
     this.usingSynth = false;
     if (resetOffset) this.pauseOffset = 0;
+    this.resetMuffle();
   }
 
   setMuted(value) {
@@ -192,12 +227,66 @@ export class AudioEngine {
     return this.muted;
   }
 
+  playBossCheckpointCue() {
+    const sfxList = CONFIG.audio.bossCheckpointSfx || [];
+    for (const entry of sfxList) {
+      this.playSfx(entry.name, entry);
+    }
+  }
+
+  async playSfx(name, options = {}) {
+    const ctx = this.ensureContext();
+    if (!ctx || this.muted) return;
+    const buffer = this.sfxBuffers.get(name) || await this.loadSfx(name, options.file);
+    if (!buffer) return;
+
+    const source = ctx.createBufferSource();
+    const gain = ctx.createGain();
+    gain.gain.value = (options.gain ?? 1) * CONFIG.audio.sfxVolume;
+    source.buffer = buffer;
+    source.connect(gain);
+    gain.connect(this.master);
+    source.onended = () => {
+      source.disconnect();
+      gain.disconnect();
+    };
+    source.start(ctx.currentTime + (options.delay || 0));
+  }
+
+  muffleDeath() {
+    if (!this.ctx || !this.fxFilter || !this.master) return;
+    const now = this.ctx.currentTime;
+    this.fxFilter.frequency.cancelScheduledValues(now);
+    this.fxFilter.frequency.setValueAtTime(this.fxFilter.frequency.value, now);
+    this.fxFilter.frequency.exponentialRampToValueAtTime(520, now + 0.65);
+    this.fxFilter.Q.cancelScheduledValues(now);
+    this.fxFilter.Q.setTargetAtTime(1.1, now, 0.18);
+    this.master.gain.cancelScheduledValues(now);
+    this.master.gain.setValueAtTime(this.master.gain.value, now);
+    this.master.gain.linearRampToValueAtTime(this.muted ? 0 : 0.28, now + 0.55);
+  }
+
+  resetMuffle() {
+    if (!this.ctx || !this.fxFilter || !this.master) return;
+    const now = this.ctx.currentTime;
+    this.fxFilter.frequency.cancelScheduledValues(now);
+    this.fxFilter.frequency.setValueAtTime(20000, now);
+    this.fxFilter.Q.cancelScheduledValues(now);
+    this.fxFilter.Q.setValueAtTime(0.7, now);
+    this.master.gain.cancelScheduledValues(now);
+    this.master.gain.setValueAtTime(this.muted ? 0 : CONFIG.audio.volume, now);
+  }
+
   detectBeat(levelBpm) {
     if (!this.playing) return false;
 
     if (this.usingSynth || !this.analyser || !this.source) {
       return this.detectSynthBeat(levelBpm);
     }
+
+    const now = performance.now();
+    if (now - this.lastAnalysisTime < CONFIG.audio.analyserIntervalMs) return false;
+    this.lastAnalysisTime = now;
 
     this.analyser.getByteFrequencyData(this.dataArray);
     let bass = 0;
@@ -207,7 +296,6 @@ export class AudioEngine {
     const avg = this.history.reduce((sum, value) => sum + value, 0) / this.history.length;
     this.history[this.historyIdx++ % this.history.length] = bass;
 
-    const now = performance.now();
     if (bass > Math.max(18, avg * 1.45) && now - this.lastBeatTime > CONFIG.audio.minBeatIntervalMs) {
       this.lastBeatTime = now;
       return true;
@@ -253,7 +341,7 @@ export class AudioEngine {
     gain.gain.setValueAtTime(gainValue, time);
     gain.gain.exponentialRampToValueAtTime(0.001, time + duration);
     osc.connect(gain);
-    gain.connect(this.master);
+    gain.connect(this.fxFilter || this.master);
     osc.start(time);
     osc.stop(time + duration + 0.02);
   }
@@ -270,7 +358,7 @@ export class AudioEngine {
     gain.gain.exponentialRampToValueAtTime(0.001, time + duration);
     source.connect(filter);
     filter.connect(gain);
-    gain.connect(this.master);
+    gain.connect(this.fxFilter || this.master);
     source.start(time);
     source.stop(time + duration + 0.02);
   }
@@ -311,6 +399,10 @@ export class AudioEngine {
     if (this.ctx && !this.usingSynth) return Math.max(0, this.ctx.currentTime - this.startedAt);
     const nowSeconds = this.ctx ? this.ctx.currentTime : performance.now() / 1000;
     return Math.max(0, nowSeconds - this.synthStartedAt);
+  }
+
+  currentTime() {
+    return this.playbackElapsed();
   }
 
   duration() {

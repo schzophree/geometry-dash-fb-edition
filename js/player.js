@@ -41,9 +41,9 @@ export class Player {
 
     if (this.onGround) {
       const snap = Math.round(this.rot / (Math.PI / 2)) * (Math.PI / 2);
-      this.rot += (snap - this.rot) * 0.28;
+      this.rot += (snap - this.rot) * 0.5;
     } else {
-      this.rot += 0.1;
+      this.rot += 0.11;
     }
 
     if (isJumpHeld && this.justLanded) this.jump();

@@ -8,6 +8,8 @@ import { GhostStatus } from './ghost.js';
 import { HUD } from './hud.js';
 import { Screens } from './screens.js';
 import { createStageArt, drawStageBack, drawStageFront } from './stage-art.js';
+import { CyberDemonBoss } from './boss.js';
+import { BOSS_MAPPING } from './level-data.js';
 
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
@@ -26,6 +28,7 @@ const hud = new HUD();
 const stars = createStars();
 const shapes = createShapes();
 const stageArt = createStageArt();
+const cyberBoss = new CyberDemonBoss(BOSS_MAPPING);
 const devParams = new URLSearchParams(window.location.search);
 
 let state = 'loading';
@@ -44,6 +47,7 @@ let bgScroll = 0;
 let beatFlash = 0;
 let screenShake = 0;
 let transition = null;
+let levelTransitionFx = null;
 let impactParticles = [];
 
 if (devParams.has('level')) {
@@ -85,6 +89,7 @@ async function bootstrap() {
 
   state = 'start';
   screens.hideLoading();
+  setStartPreviewLevel(selectedLevel);
   screens.showStart(selectedLevel, assets.logo);
   if (devParams.has('autostart')) {
     startGame({ levelIndex: selectedLevel, clearCheckpoint: true });
@@ -122,28 +127,37 @@ function updatePlaying(dt) {
     beatFlash = 1;
     screenShake = Math.max(screenShake, 3.5);
   }
+  const audioTime = audio.currentTime();
 
   score += CONFIG.SCORE_PER_FRAME * dt;
   handleLevelTransition();
 
   const activeLevel = getLevel(currentLevelIndex);
-  gameSpeed = Math.min(activeLevel.speed + 2.3, gameSpeed + 0.0018 * dt);
-  obInterval = Math.max(activeLevel.obMin, obInterval - 0.012 * dt);
+  gameSpeed = activeLevel.speed;
+  obInterval = activeLevel.obInterval;
   bgScroll += gameSpeed * dt;
 
   player.update(isJumpHeld);
-  const collected = obstacles.update(dt, activeLevel, gameSpeed, obInterval, player.hitbox(), frame);
+  const collected = obstacles.update(dt, activeLevel, gameSpeed, obInterval, player.hitbox(), frame, {
+    spawnObstacles: activeLevel.index !== 2,
+  });
   if (collected > 0) {
     lives += collected;
     screenShake = Math.max(screenShake, 2.2);
   }
 
   facebook.update(player, gameSpeed, score - activeLevel.scoreStart, frame);
+  if (activeLevel.index === 2) {
+    cyberBoss.update(dt, audioTime, beatFlash, player.hitbox());
+    screenShake = Math.max(screenShake, cyberBoss.takeShake());
+  }
   ghost.update(dt, frame);
   updateImpactParticles(dt);
 
   if (!player.isInvincible()) {
-    if (obstacles.collidesWithPlayer(player.hitbox())) {
+    if (activeLevel.index === 2 && cyberBoss.checkCollision()) {
+      applyDamage('Hancur oleh Laser Cyber-Demon FB!');
+    } else if (obstacles.collidesWithPlayer(player.hitbox())) {
       applyDamage('Kena rintangan neon.');
     } else if (facebook.caught(player)) {
       applyDamage('Logo Fesnuk berhasil nyentuh cube.');
@@ -156,9 +170,13 @@ function updatePlaying(dt) {
 }
 
 function handleLevelTransition() {
-  const nextIndex = getLevelIndexForScore(score);
-  if (nextIndex <= currentLevelIndex) return;
+  const targetIndex = getLevelIndexForScore(score);
+  if (targetIndex <= currentLevelIndex) return;
   if (!audio.songFinishedOnce()) return;
+
+  // Mencegah skip level: paksa agar selalu transisi 1 level saja secara berurutan
+  const nextIndex = currentLevelIndex + 1;
+  if (nextIndex >= CONFIG.levels.length) return; // Cegah error jika sudah di level mentok
 
   for (let levelIndex = currentLevelIndex + 1; levelIndex <= nextIndex; levelIndex++) {
     const nextLevel = getLevel(levelIndex);
@@ -184,28 +202,36 @@ function handleLevelTransition() {
   const previousTheme = getLevel(currentLevelIndex).theme;
   currentLevelIndex = nextIndex;
   const level = getLevel(currentLevelIndex);
+  if (level.name === 'BOSS') audio.playBossCheckpointCue();
   transition = {
     from: previousTheme,
     to: level.theme,
     started: performance.now(),
     duration: 800,
   };
+  levelTransitionFx = {
+    label: level.label,
+    name: level.name,
+    started: performance.now(),
+    duration: 920,
+  };
   screens.setTheme(level.theme);
   obstacles.reset();
   ghost.reset();
+  cyberBoss.reset();
   audio.playLevel(currentLevelIndex, 0);
   console.log('[game] checkpoint saved', checkpoint);
 }
 
 function applyDamage(reason) {
-  if (player.isInvincible()) return;
-
-  if (lives > 0) {
+  if (!CONFIG.gameplay.oneHitKill && lives > 0) {
     lives -= 1;
-    player.hit();
     spawnImpact(player.x + player.size / 2, player.y + player.size / 2, '#ff4488', 18);
     screenShake = Math.max(screenShake, 8);
-    return;
+    if (lives > 0) {
+      player.hit();
+      return;
+    }
   }
 
   triggerGameOver(reason);
@@ -213,7 +239,7 @@ function applyDamage(reason) {
 
 function triggerGameOver(reason) {
   state = 'dead';
-  audio.stop();
+  audio.muffleDeath();
   spawnImpact(player.x + player.size / 2, player.y + player.size / 2, '#ff3355', 42);
   screens.showGameOver({
     score,
@@ -255,12 +281,14 @@ function startGame({ fromCheckpoint = false, levelIndex = selectedLevel, clearCh
   bgScroll = 0;
   impactParticles = [];
   transition = null;
+  levelTransitionFx = null;
   lastTime = performance.now();
 
   player.reset();
   facebook.reset();
   obstacles.reset();
   ghost.reset();
+  cyberBoss.reset();
   audio.playLevel(currentLevelIndex, 0);
   console.log('[game] start', { fromCheckpoint, level: level.name, score, lives });
 }
@@ -290,6 +318,7 @@ function returnToMenu() {
   state = 'start';
   screens.hidePause();
   screens.hideGameOver();
+  setStartPreviewLevel(selectedLevel);
   screens.showStart(selectedLevel, assets.logo);
 }
 
@@ -334,6 +363,9 @@ function drawScene(withEntities) {
   drawStageFront(ctx, stageArt, level, theme, bgScroll, beatFlash, frame);
 
   if (withEntities || state === 'dead' || state === 'paused') {
+    if (currentLevelIndex === 2) {
+      cyberBoss.draw(ctx, assets, theme, player.hitbox(), beatFlash, frame);
+    }
     player.drawTrail(ctx, theme);
     obstacles.draw(ctx, assets, theme, beatFlash, frame);
     facebook.draw(ctx, theme, beatFlash);
@@ -343,6 +375,8 @@ function drawScene(withEntities) {
   }
 
   ctx.restore();
+
+  drawLevelTransitionOverlay(ctx, level, theme);
 
   if (state === 'playing' || state === 'paused' || state === 'dead') {
     hud.draw(ctx, {
@@ -356,6 +390,63 @@ function drawScene(withEntities) {
       songProgress: state === 'playing' || state === 'paused' || state === 'dead' ? audio.progress() : null,
     });
   }
+}
+
+function drawLevelTransitionOverlay(drawCtx, level, theme) {
+  if (!levelTransitionFx) return;
+
+  const elapsed = performance.now() - levelTransitionFx.started;
+  const t = elapsed / levelTransitionFx.duration;
+  if (t >= 1) {
+    levelTransitionFx = null;
+    return;
+  }
+
+  const wipe = easeOutCubic(clamp((t - 0.06) / 0.54, 0, 1));
+  const textIn = clamp((t - 0.16) / 0.22, 0, 1);
+  const textOut = clamp((0.86 - t) / 0.18, 0, 1);
+  const textAlpha = Math.min(textIn, textOut);
+  const flashAlpha = Math.max(0, 0.55 - t * 1.8);
+  const bandX = -CONFIG.W * 0.75 + wipe * CONFIG.W * 1.55;
+
+  drawCtx.save();
+  if (flashAlpha > 0) {
+    drawCtx.globalAlpha = flashAlpha;
+    drawCtx.fillStyle = '#ffffff';
+    drawCtx.fillRect(0, 0, CONFIG.W, CONFIG.H);
+  }
+
+  drawCtx.globalAlpha = 0.78;
+  drawCtx.fillStyle = `${theme.primary}cc`;
+  drawCtx.beginPath();
+  drawCtx.moveTo(bandX - 110, 0);
+  drawCtx.lineTo(bandX + 190, 0);
+  drawCtx.lineTo(bandX + 70, CONFIG.H);
+  drawCtx.lineTo(bandX - 230, CONFIG.H);
+  drawCtx.closePath();
+  drawCtx.fill();
+
+  drawCtx.globalAlpha = 0.42;
+  drawCtx.fillStyle = `${theme.accent}aa`;
+  drawCtx.fillRect(0, CONFIG.GROUND_Y - 6, CONFIG.W * wipe, 10);
+
+  if (textAlpha > 0.02) {
+    drawCtx.globalAlpha = textAlpha;
+    drawCtx.textAlign = 'center';
+    drawCtx.fillStyle = '#ffffff';
+    drawCtx.font = '42px Pusab, Impact, Arial Black, sans-serif';
+    drawCtx.shadowColor = theme.primary;
+    drawCtx.shadowBlur = CONFIG.performance.lowFx ? 6 : 18;
+    drawCtx.fillText(levelTransitionFx.label, CONFIG.W / 2, 184);
+    drawCtx.font = '24px Pusab, Impact, Arial Black, sans-serif';
+    drawCtx.fillStyle = theme.accent;
+    drawCtx.fillText(levelTransitionFx.name, CONFIG.W / 2, 220);
+  }
+  drawCtx.restore();
+}
+
+function easeOutCubic(t) {
+  return 1 - Math.pow(1 - t, 3);
 }
 
 function effectiveTheme(level) {
@@ -415,9 +506,8 @@ function bindUI() {
 
   for (const button of document.querySelectorAll('.level-choice')) {
     button.addEventListener('click', () => {
-      selectedLevel = Number(button.dataset.level);
+      setStartPreviewLevel(Number(button.dataset.level));
       screens.updateLevelButtons(selectedLevel);
-      screens.setTheme(getLevel(selectedLevel).theme);
     });
   }
 
@@ -456,39 +546,46 @@ function onKeyDown(event) {
     event.preventDefault();
     if (state === 'playing') pauseGame();
     else if (state === 'paused') resumeGame();
-    return;
   }
 
   if (event.code === 'Enter') {
     event.preventDefault();
-    audio.unlock();
-    if (state === 'start') startGame({ levelIndex: selectedLevel, clearCheckpoint: true });
-    else if (state === 'dead') restartFromBeginning();
+    if (state === 'dead') startGame({ fromCheckpoint: Boolean(checkpoint), clearCheckpoint: false });
+    else if (state === 'start') startGame({ levelIndex: selectedLevel, clearCheckpoint: true });
   }
 }
 
 function onKeyUp(event) {
-  if (event.code === 'Space' || event.code === 'ArrowUp' || event.code === 'KeyW') {
+  const jumpKey = event.code === 'Space' || event.code === 'ArrowUp' || event.code === 'KeyW';
+  if (jumpKey) {
+    event.preventDefault();
     isJumpHeld = false;
   }
 }
 
 function onPointerDown(event) {
   event.preventDefault();
+  isJumpHeld = true;
   audio.unlock();
   const pos = canvasPoint(event);
-  isJumpHeld = true;
-
   if (state === 'playing') {
     if (hud.hitPauseButton(pos.x, pos.y)) pauseGame();
     else player.jump();
-  } else if (state === 'start') {
-    startGame({ levelIndex: selectedLevel, clearCheckpoint: true });
-  } else if (state === 'dead') {
-    restartFromBeginning();
-  } else if (state === 'paused') {
-    resumeGame();
   }
+  else if (state === 'start') startGame({ levelIndex: selectedLevel, clearCheckpoint: true });
+  else if (state === 'dead') startGame({ fromCheckpoint: Boolean(checkpoint), clearCheckpoint: false });
+}
+
+function setStartPreviewLevel(levelIndex) {
+  selectedLevel = clamp(levelIndex, 0, CONFIG.levels.length - 1);
+  if (state !== 'start' && state !== 'loading') return;
+
+  currentLevelIndex = selectedLevel;
+  const level = getLevel(currentLevelIndex);
+  score = level.scoreStart;
+  gameSpeed = level.speed;
+  obInterval = level.obInterval;
+  screens.setTheme(level.theme);
 }
 
 function canvasPoint(event) {

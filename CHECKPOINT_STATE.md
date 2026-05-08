@@ -1,75 +1,114 @@
-# 🚩 CHECKPOINT: Geometry Dash — Dikejar Facebook (Fesnuk Edition)
+# CHECKPOINT: Geometry Dash Fesnuk Edition
 
-**Tanggal:** 8 Mei 2026  
-**Status Proyek:** Fase Pengembangan Lanjut (Modular & Responsive)  
-**Pengembang:** Moonchi (Dan)
+Tanggal: 9 Mei 2026  
+Status: Gameplay 3 level + boss checkpoint SFX + low-FX optimization + staged particles + neon transition + manual boss mapping
 
----
+## Kondisi Terakhir
 
-## 📊 Status Saat Ini
-Game sudah memiliki pondasi modular yang kuat menggunakan ES Modules. Semua sistem (Player, Obstacles, Audio, HUD, dll) terpisah dalam file tersendiri di folder `js/`, memudahkan pengembangan fitur baru tanpa merusak logika inti.
+Game memakai struktur modular ES Modules di folder `js/`. Entry point utama tetap `index.html`, styling utama di `style.css`, dan daftar lagu di `music-list.js`.
 
-### Fitur Utama yang Sudah Implementasi:
-1.  **Sistem Level & Tema Dinamis:**
-    *   4 Level (Easy, Normal, Hard, Insane) dengan transisi visual yang mulus.
-    *   Setiap level memiliki skema warna (Theme) unik yang berubah saat skor mencapai threshold tertentu.
-    *   Threshold transisi: Skor 900, 2100, dan 3800.
-2.  **Mekanik Pengejar (Facebook Chaser):**
-    *   Icon Facebook yang mengejar dari kiri.
-    *   Sistem "Pressure" dan "Angry Mode" saat jarak terlalu dekat.
-3.  **Ghost Status FB (Hantu Sosial Media):**
-    *   Overlay status Facebook yang muncul secara acak dengan pesan-pesan lucu (taunting).
-    *   Efek visual hantu (glow, float, fade) sepenuhnya menggunakan Canvas API.
-4.  **Audio Engine (Hybrid):**
-    *   Mendukung BGM (MP3) dengan lazy-loading per level.
-    *   Dilengkapi beat-detection untuk efek visual (beat-flash, screen-shake).
-    *   Fallback Web Audio synthesis jika file audio tidak ditemukan.
-5.  **Sistem Checkpoint Sesi:**
-    *   Menyimpan progress (skor, level, nyawa) setiap transisi level.
-    *   Pemain bisa memilih "Lanjut dari Checkpoint" setelah Game Over.
-6.  **Responsive & Visual:**
-    *   Canvas menskala otomatis sesuai viewport browser.
-    *   Efek partikel (impact), trail pemain, dan parallax background.
+Mode gameplay terbaru mengikuti `GEOMETRY_DASH_IMPROVEMENTS.md`:
 
----
+- Physics lebih berat: gravity `0.95`, jump force `-16.5`.
+- `coyoteFrames = 0`, `invincibleFrames = 0`.
+- Speed/interval level dibuat konstan, tidak naik otomatis per frame.
+- `CONFIG.gameplay.oneHitKill = true`, jadi tabrakan langsung game over.
+- Heart item dan HUD hati lama nonaktif saat `oneHitKill` aktif.
 
-## 📂 Struktur Modular (JS Modules)
-*   `main.js`: State machine utama, game loop, dan integrasi antar sistem.
-*   `config.js`: Pusat pengaturan (skor, gravitasi, level, tema).
-*   `player.js`: Logika fisika, hitbox, dan rendering pemain.
-*   `obstacles.js`: Manajemen rintangan (spawn, collision, collection).
-*   `facebook.js`: AI pengejar dan deteksi tangkapan.
-*   `audio.js`: Engine suara dan beat-sync.
-*   `ghost.js`: Fitur hantu status Facebook.
-*   `assets.js`: Loader gambar/font dan fallback renderer.
-*   `hud.js` & `screens.js`: UI (Heads-Up Display) dan overlay layar (Start, Pause, Dead).
-*   `stage-art.js`: Detail visual tambahan untuk stage (hex walls, portals, dll).
+## Level Aktif
 
----
+Jumlah level sekarang disamakan dengan jumlah lagu default di `music-list.js`, yaitu 3 level.
 
-## 🛠️ Daftar Level & Milestone
-| Level | Nama | Threshold Skor | Kecepatan | Tema Visual |
-| :--- | :--- | :--- | :--- | :--- |
-| **Level 1** | EASY | 0 | 5.5 | Biru (Stereo Madness vibe) |
-| **Level 2** | NORMAL | 900 | 6.5 | Oranye (Back On Track vibe) |
-| **Level 3** | HARD | 2100 | 7.8 | Ungu (Polargeist vibe) |
-| **Level 4** | INSANE | 3800 | 9.2 | Merah (Dry Out vibe) |
+| Level | Musik | Score Start | Checkpoint | Tema |
+| --- | --- | ---: | --- | --- |
+| Level 1 EASY | `music/level1.mp3` | 0 | - | Biru neon |
+| Level 2 NORMAL | `music/level2.mp3` | 900 | Score 900 | Oranye neon |
+| Level 3 BOSS | `music/boss.mp3` | 2100 | Score 2100 | Merah boss/final |
 
----
+Checkpoint sesi hanya ada di transisi level:
 
-## 📝 Catatan Developer Terakhir
-*   Asset loader sekarang lebih robust dengan progress bar di loading screen.
-*   Ditambahkan sistem nyawa (Lives) dan item Heart yang muncul secara acak.
-*   Invincibility frame (90 frame) aktif setelah terkena hit agar pemain tidak langsung mati beruntun.
-*   UI Pause menu sudah fungsional (Lanjutkan, Menu Utama, Mute).
+- Level 1 ke Level 2: score 900
+- Level 2 ke Level 3: score 2100
+- Tidak ada Level 4 / INSANE lagi
 
----
+## Aturan Transisi Level
 
-## 🚀 Rencana Selanjutnya (Next Tasks)
-1.  **Boss Screenshot Overlay:** Mengintegrasikan screenshot khusus di Level 4.
-2.  **Sound FX Enhancement:** Menambahkan lebih banyak SFX untuk feedback jump dan landing.
-3.  **Optimization:** Tweak performa pada mode Low FX untuk perangkat mobile low-end.
-4.  **Level Design:** Menambah variasi pola rintangan yang lebih menantang di Level 3 & 4.
+Transisi level tidak boleh lompat langsung ke level akhir.
 
----
-*Checkpoint ini dibuat otomatis sebagai rangkuman progress proyek "Dikejar Facebook — Geometry Dash Edition".*
+Logika saat ini:
+
+- Score boleh melewati lebih dari satu threshold saat lagu masih berjalan.
+- Level baru hanya aktif kalau score sudah melewati threshold dan lagu level aktif sudah selesai minimal sekali.
+- Saat transisi, game hanya naik 1 level dari level aktif, meskipun score sudah melewati threshold berikutnya.
+- Setelah transisi, lagu level berikutnya mulai dari awal.
+
+## Audio Game Over
+
+Saat nyawa habis, musik tidak langsung dihentikan. Audio diberi efek low-pass / high-cut supaya terdengar mendem:
+
+- Cutoff turun ke sekitar 520 Hz.
+- Volume turun ke level rendah.
+- Efek di-reset saat restart, lanjut dari checkpoint, atau kembali main.
+
+Implementasi ada di `js/audio.js` melalui `muffleDeath()` dan `resetMuffle()`.
+
+## Audio Boss Checkpoint
+
+Saat transisi dari Level 2 ke Level 3 BOSS, game memutar dua SFX pendek secara layered:
+
+- `geometry-dash-assets/warning-alarm-not-loud.mp3`
+- `geometry-dash-assets/incoming-tears.mp3`
+
+Implementasi ada di `CONFIG.audio.bossCheckpointSfx`, `AudioEngine.playBossCheckpointCue()`, dan dipanggil dari `handleLevelTransition()` saat level berikutnya bernama `BOSS`.
+
+## Optimasi Low-FX
+
+Mode low-FX aktif lewat `CONFIG.performance.lowFx = true`.
+
+Yang sudah dipangkas:
+
+- Stars turun ke 30.
+- Wireframe shapes turun ke 6.
+- Sparks boss-stage turun ke 14.
+- Cave teeth turun ke 18.
+- Hex wall penuh diganti menjadi 16 hex marks saat low-FX.
+- Beat analyzer dibatasi sekitar 30 FPS melalui `CONFIG.audio.analyserIntervalMs`.
+
+## Visual Partikel Terbaru
+
+- Level 1 sekarang punya 18 ambient sparks ringan supaya awal game/menu tidak kosong.
+- Level 2 memakai sparks sedang dan tetap lebih kalem dari BOSS.
+- Level 3 BOSS memakai spark count lebih besar, shard storm, dan red hazard bands sebagai placeholder brutal sebelum desain monster final.
+- Versi BOSS sudah dibuat lebih ringan untuk i5 gen 6: jumlah sparks/shards dipangkas, shadow/composite/rotate dikurangi saat `lowFx`.
+- Preview menu mengikuti tombol level yang dipilih, jadi background EASY/NORMAL/BOSS tidak nyangkut di level terakhir.
+
+## Transisi Level
+
+Saat checkpoint transisi level aktif, game menampilkan flash putih singkat, wipe neon horizontal, dan label level baru. Implementasi ada di `levelTransitionFx` dan `drawLevelTransitionOverlay()` pada `js/main.js`.
+
+## Manual Boss Mapping
+
+Level 3 BOSS sekarang memakai sistem manual mapping:
+
+- `js/level-data.js`: timeline `BOSS_MAPPING` berbasis detik lagu.
+- `js/boss.js`: `CyberDemonBoss`, trigger system, visual boss, laser, pillar, mouth vortex, dan like burst.
+- `js/audio.js`: `audio.currentTime()` menjadi source of truth untuk beat sync.
+- `js/main.js`: update/draw boss hanya saat `currentLevelIndex === 2`.
+
+Boss memakai crop sprite dari `GJ_GameSheet02-hd.png` melalui asset loader kalau file di `geometry-dash-assets\geometry-dash-assets` tersedia. Jika spritesheet gagal load, visual tetap jalan dengan Canvas fallback.
+
+## File Penting
+
+- `js/config.js`: jumlah level, threshold score, tema, speed, checkpoint.
+- `js/main.js`: state machine, transisi level, damage, game over.
+- `js/audio.js`: lazy-load musik, beat detection, efek muffled saat game over.
+- `js/stage-art.js`: visual boss-stage, portal, hex wall, speed arrows.
+- `js/boss.js`: Boss Manager manual mapping untuk Level 3.
+- `js/level-data.js`: timeline serangan boss berbasis detik lagu.
+- `music-list.js`: daftar 3 lagu default.
+
+## Catatan Lanjutan
+
+- Kalau nanti menambah lagu ke-4, baru tambahkan level baru di `CONFIG.levels`.
+- Kalau tetap 3 lagu, jangan tambahkan tombol level ke-4 di `index.html`.
+- Jika score terasa terlalu cepat melewati threshold, ubah `SCORE_PER_FRAME` atau threshold `scoreStart` di `js/config.js`.
