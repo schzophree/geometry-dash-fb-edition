@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Geometry Dash: Fesnuk Edition</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="music-list.js"></script>
+  <script type="module" src="js/main.js"></script>
+</head>
+<body>
+  <main id="gameWrap" class="game-wrap" aria-label="Geometry Dash Fesnuk Edition">
+    <canvas id="gameCanvas" width="800" height="450" aria-label="Geometry Dash Fesnuk game canvas"></canvas>
+
+    <section id="loadingOverlay" class="screen loading-screen is-visible" aria-live="polite">
+      <div class="loading-card">
+        <div class="loading-title">GEOMETRY DASH: FESNUK EDITION</div>
+        <div class="loading-track"><span id="loadingFill"></span></div>
+        <div id="loadingText" class="loading-text">Loading assets 0%</div>
+      </div>
+    </section>
+
+    <section id="startOverlay" class="screen start-screen" aria-label="Menu utama">
+      <div class="screen-shade"></div>
+      <div class="start-content">
+        <img id="logoImage" class="logo-image" alt="Geometry Dash Fesnuk logo" hidden />
+        <h1 id="logoText" class="game-logo">DIKEJAR FACEBOOK</h1>
+        <p class="game-subtitle">Geometry Dash Edition</p>
+
+        <div class="difficulty-stars" aria-hidden="true">
+          <span>*</span><span>*</span><span>*</span><span>*</span>
+        </div>
+
+        <div id="levelButtons" class="level-buttons" aria-label="Pilih tingkat awal">
+          <button type="button" data-level="0" class="level-choice is-active">EASY</button>
+          <button type="button" data-level="1" class="level-choice">NORMAL</button>
+          <button type="button" data-level="2" class="level-choice">HARD</button>
+          <button type="button" data-level="3" class="level-choice">INSANE</button>
+        </div>
+
+        <button id="startButton" type="button" class="start-button" aria-label="Mulai game">
+          <span class="play-triangle" aria-hidden="true"></span>
+          <span>MULAI</span>
+        </button>
+
+        <p class="start-blink">SPASI / TAP UNTUK MAIN</p>
+        <p class="start-hint">TAHAN untuk lompat terus · ENTER = mulai</p>
+        <div class="fb-start-icon" aria-hidden="true">f</div>
+      </div>
+    </section>
+
+    <section id="pauseOverlay" class="screen pause-screen" aria-label="Game dijeda">
+      <div class="pause-card">
+        <h2><span aria-hidden="true">⏸</span> DIJEDA</h2>
+        <div class="pause-line"></div>
+        <p id="pauseScore">Score: 0</p>
+        <p id="pauseSong">Song: Synth Beat</p>
+        <button id="resumeButton" type="button" class="pause-action primary">▶ LANJUTKAN</button>
+        <button id="pauseRestartButton" type="button" class="pause-action">↻ MAIN LAGI</button>
+        <button id="menuButton" type="button" class="pause-action">⌂ MENU UTAMA</button>
+        <button id="muteButton" type="button" class="pause-action">🔊 MUTE</button>
+      </div>
+    </section>
+
+    <section id="deadOverlay" class="screen dead-screen" aria-label="Game over">
+      <div class="dead-card">
+        <h2>GAME OVER</h2>
+        <p id="deadReason">Facebook berhasil nyentuh cube.</p>
+        <p id="deadScore">Score: 0</p>
+        <button id="continueCheckpointButton" type="button" class="dead-action checkpoint">▶ LANJUT DARI CHECKPOINT</button>
+        <button id="restartButton" type="button" class="dead-action">↻ MULAI DARI AWAL</button>
+      </div>
+    </section>
+
+    <div id="checkpointFlash" class="checkpoint-flash" aria-live="polite">CHECKPOINT!</div>
+  </main>
+</body>
+</html>
