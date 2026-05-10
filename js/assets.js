@@ -1,4 +1,6 @@
 import { CONFIG, clamp } from './config.js';
+import { Spritesheet, drawPlayerFallbackCube } from './spritesheet.js';
+import { getPerfConfig } from './perf.js';
 
 const IMAGE_GROUPS = {
   sheet1: [
@@ -15,6 +17,7 @@ const IMAGE_GROUPS = {
   ],
   ground: ['assets/backgrounds/ground.png'],
   logo: ['assets/ui/logo.png', 'assets/images/ui/logo.png'],
+  bossCyberDemon: ['assets/images/boss/cyber-demon-fb.png'],
 };
 
 function imageGroupForBackground(index) {
@@ -27,6 +30,7 @@ export class AssetLoader {
     this.backgrounds = [];
     this.logo = null;
     this.progress = 0;
+    this.spritesheet = new Spritesheet();
   }
 
   async preload(onProgress = () => {}) {
@@ -34,6 +38,7 @@ export class AssetLoader {
     const queue = [
       ['sheet1', IMAGE_GROUPS.sheet1],
       ['sheet2', IMAGE_GROUPS.sheet2],
+      ['bossCyberDemon', IMAGE_GROUPS.bossCyberDemon],
       ['ground', IMAGE_GROUPS.ground],
       ['logo', IMAGE_GROUPS.logo],
     ];
@@ -60,6 +65,11 @@ export class AssetLoader {
     }
 
     await Promise.all(tasks);
+    
+    // Initialize spritesheet from loaded sheets
+    // Hanya GJ_GameSheet-hd (2048) — jangan campur Sheet02 (layout beda = tekstur acak/lag).
+    await this.spritesheet.init(IMAGE_GROUPS.sheet1);
+    
     console.log('[assets] preload finished', {
       loaded: [...this.images.keys()],
       fallbacks: queue.length - this.images.size,
@@ -79,31 +89,45 @@ export class AssetLoader {
   }
 
   drawBackground(ctx, level, theme, scroll, beatFlash, stars, shapes) {
-    const bg = this.backgrounds[level.index];
     const skyH = CONFIG.GROUND_Y;
     ctx.save();
 
-    if (bg) {
-      drawCoverTiled(ctx, bg, 0, 0, CONFIG.W, skyH);
-      const overlay = ctx.createLinearGradient(0, 0, 0, skyH);
-      overlay.addColorStop(0, `${theme.bg0}55`);
-      overlay.addColorStop(1, `${theme.bg1}88`);
-      ctx.fillStyle = overlay;
-      ctx.fillRect(0, 0, CONFIG.W, skyH);
-    } else {
-      const bgGrad = ctx.createLinearGradient(0, 0, 0, CONFIG.H);
-      bgGrad.addColorStop(0, theme.bg0);
-      bgGrad.addColorStop(0.72, theme.bg1);
-      bgGrad.addColorStop(1, theme.bg2);
-      ctx.fillStyle = bgGrad;
-      ctx.fillRect(0, 0, CONFIG.W, CONFIG.H);
+    // Deep gradient background
+    const bgGrad = ctx.createLinearGradient(0, 0, 0, CONFIG.H);
+    bgGrad.addColorStop(0, theme.bg0);
+    bgGrad.addColorStop(0.4, theme.bg1);
+    bgGrad.addColorStop(1, theme.bg2);
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, CONFIG.W, CONFIG.H);
+
+    // Epic Geometry Dash Style Moving Grid
+    ctx.save();
+    ctx.globalAlpha = 0.15 + beatFlash * 0.1;
+    ctx.strokeStyle = theme.primary;
+    ctx.lineWidth = 2;
+    const gridSpacing = 60;
+    const gridOffset = -(scroll * 0.4) % gridSpacing;
+    
+    // Vertical grid lines
+    ctx.beginPath();
+    for (let x = gridOffset; x <= CONFIG.W + gridSpacing; x += gridSpacing) {
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, skyH);
     }
+    // Horizontal grid lines
+    for (let y = skyH; y >= 0; y -= gridSpacing) {
+      ctx.moveTo(0, y);
+      ctx.lineTo(CONFIG.W, y);
+    }
+    ctx.stroke();
+    ctx.restore();
 
     drawStars(ctx, stars, scroll, theme, beatFlash);
-    drawParallaxShapes(ctx, shapes, scroll, theme, beatFlash);
+    if (getPerfConfig().parallax) drawParallaxShapes(ctx, shapes, scroll, theme, beatFlash);
 
+    // Beat Flash Overlay
     if (beatFlash > 0.02) {
-      ctx.globalAlpha = beatFlash * 0.12;
+      ctx.globalAlpha = beatFlash * 0.15;
       ctx.fillStyle = theme.primary;
       ctx.fillRect(0, 0, CONFIG.W, skyH);
     }
@@ -112,71 +136,106 @@ export class AssetLoader {
   }
 
   drawGround(ctx, theme, scroll, beatFlash) {
-    const groundImg = this.images.get('ground');
     const y = CONFIG.GROUND_Y;
     const h = CONFIG.H - y;
 
     ctx.save();
-    if (groundImg) {
-      const tileW = Math.max(48, (groundImg.width / Math.max(1, groundImg.height)) * h);
-      const start = -((scroll * 0.85) % tileW);
-      for (let x = start - tileW; x < CONFIG.W + tileW; x += tileW) {
-        ctx.drawImage(groundImg, x, y, tileW, h);
-      }
-    } else {
-      const grad = ctx.createLinearGradient(0, y, 0, CONFIG.H);
-      grad.addColorStop(0, theme.gnd0);
-      grad.addColorStop(1, theme.gnd1);
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, y, CONFIG.W, h);
+    
+    // Base solid ground color
+    const grad = ctx.createLinearGradient(0, y, 0, CONFIG.H);
+    grad.addColorStop(0, theme.gnd0);
+    grad.addColorStop(1, theme.gnd1);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, y, CONFIG.W, h);
 
-      ctx.strokeStyle = `${theme.line}66`;
-      ctx.lineWidth = 1;
-      const grid = 24;
-      const offset = -((scroll * 0.9) % grid);
-      for (let x = offset; x <= CONFIG.W + grid; x += grid) {
-        ctx.beginPath();
-        ctx.moveTo(x, y);
-        ctx.lineTo(x - 22, CONFIG.H);
-        ctx.stroke();
-      }
-      for (let gy = y + grid; gy < CONFIG.H; gy += grid) {
-        ctx.beginPath();
-        ctx.moveTo(0, gy);
-        ctx.lineTo(CONFIG.W, gy);
-        ctx.stroke();
-      }
-    }
-
-    ctx.shadowColor = theme.line;
-    ctx.shadowBlur = CONFIG.performance.lowFx ? 3 + beatFlash * 5 : 8 + beatFlash * 16;
+    // Dynamic ground grid
     ctx.strokeStyle = theme.line;
-    ctx.lineWidth = 4;
+    ctx.globalAlpha = 0.5 + beatFlash * 0.3;
+    ctx.lineWidth = 2;
+    const grid = 30;
+    
+    // Ground moves faster than background (parallax)
+    const offset = -((scroll * 1.0) % grid); 
+    
+    // Slanted lines for 3D speed effect
+    for (let x = offset - grid; x <= CONFIG.W + grid * 2; x += grid) {
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x - h, CONFIG.H); // Slant backwards
+      ctx.stroke();
+    }
+    
+    // Horizontal lines in ground
+    for (let gy = y + grid; gy < CONFIG.H; gy += grid) {
+      ctx.beginPath();
+      ctx.moveTo(0, gy);
+      ctx.lineTo(CONFIG.W, gy);
+      ctx.stroke();
+    }
+    
+    ctx.globalAlpha = 1.0;
+
+    // Epic Glowing Top Edge
+    ctx.shadowColor = theme.line;
+    ctx.shadowBlur =
+      CONFIG.performance.lowFx || !getPerfConfig().shadowBlur ? 3 + beatFlash * 5 : 12 + beatFlash * 20;
+    ctx.strokeStyle = theme.line;
+    ctx.lineWidth = 5;
     ctx.beginPath();
     ctx.moveTo(0, y);
     ctx.lineTo(CONFIG.W, y);
     ctx.stroke();
+    
+    // Secondary bright line
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(CONFIG.W, y);
+    ctx.stroke();
+    
     ctx.restore();
   }
 
   drawPlayer(ctx, player, theme, beatFlash, frame) {
-    const sheet = this.images.get('sheet1');
     const flicker = player.invincible > 0 && Math.floor(frame / 6) % 2 === 0;
     if (flicker) return;
 
     ctx.save();
     ctx.translate(player.x + player.size / 2, player.y + player.size / 2);
+    
+    // Reverse gravity flip
+    if (player.gravity === -1) {
+      ctx.scale(1, -1);
+    }
+    
     ctx.rotate(player.rot);
+    const allowGlowDraw = !CONFIG.performance.lowFx && getPerfConfig().shadowBlur;
     ctx.shadowColor = theme.accent;
-    ctx.shadowBlur = CONFIG.performance.lowFx ? 6 + beatFlash * 6 : 12 + beatFlash * 14;
+    ctx.shadowBlur = allowGlowDraw ? 6 + beatFlash * 6 : 4 + beatFlash * 4;
 
-    if (sheet) {
-      ctx.drawImage(sheet, 0, 0, 75, 75, -player.size / 2, -player.size / 2, player.size, player.size);
-      ctx.strokeStyle = `${theme.primary}aa`;
-      ctx.lineWidth = 2;
-      ctx.strokeRect(-player.size / 2, -player.size / 2, player.size, player.size);
+    if (player.mode === 'ship') {
+      drawFallbackShip(ctx, player.size, theme);
+    } else if (player.mode === 'ball') {
+      drawFallbackBall(ctx, player.size, theme);
     } else {
-      drawFallbackCube(ctx, player.size, theme);
+      if (CONFIG.gameplay.useVectorCubeIcon) {
+        drawPlayerFallbackCube(ctx, player.size, theme, beatFlash, allowGlowDraw);
+      } else {
+        const sprite = this.spritesheet.getSprite('cube_01');
+        if (sprite) {
+          ctx.drawImage(
+            sprite,
+            Math.round(-player.size / 2),
+            Math.round(-player.size / 2),
+            player.size,
+            player.size,
+          );
+        } else {
+          drawPlayerFallbackCube(ctx, player.size, theme, beatFlash, allowGlowDraw);
+        }
+      }
     }
 
     ctx.restore();
@@ -184,16 +243,122 @@ export class AssetLoader {
 
   drawObstacle(ctx, obs, theme, beatFlash) {
     ctx.save();
-    ctx.shadowColor = theme.obC;
-    ctx.shadowBlur = CONFIG.performance.lowFx ? 4 + beatFlash * 4 : 11 + beatFlash * 9;
-    if (obs.type === 'spike') drawSpike(ctx, obs.x, obs.y, obs.w, obs.h, theme);
-    else drawBlock(ctx, obs.x, obs.y, obs.w, obs.h, theme, obs.type === 'tall');
+    const glowOb =
+      !CONFIG.performance.lowFx && getPerfConfig().shadowBlur;
+    ctx.shadowBlur = glowOb ? 4 + beatFlash * 3 : 0;
+    
+    if (obs.type.startsWith('portal_')) {
+      const spriteKey = obs.type.toLowerCase();
+      const sprite = this.spritesheet.getSprite(spriteKey);
+      if (sprite) {
+        ctx.drawImage(sprite, obs.x, obs.y, obs.w, obs.h);
+      } else {
+        drawPortal(ctx, obs.x, obs.y, obs.w, obs.h, obs.type, theme);
+      }
+    } else if (obs.type.startsWith('orb_')) {
+      const sprite = this.spritesheet.getSprite(obs.type);
+      if (sprite) {
+        ctx.drawImage(sprite, obs.x, obs.y, obs.w, obs.h);
+      } else {
+        drawOrb(ctx, obs.x, obs.y, obs.w, obs.h, obs.type, theme);
+      }
+    } else if (obs.type === 'pillar') {
+      ctx.shadowColor = theme.accent;
+      drawBlock(ctx, obs.x, obs.y, obs.w, obs.h, theme, true);
+    } else if (obs.type === 'spike') {
+      ctx.shadowColor = theme.obC;
+      const sprite = this.spritesheet.getSprite('spike_01');
+      if (sprite) {
+        ctx.drawImage(sprite, obs.x, obs.y, obs.w, obs.h);
+      } else {
+        drawSpike(ctx, obs.x, obs.y, obs.w, obs.h, theme);
+      }
+    } else {
+      ctx.shadowColor = theme.obC;
+      const sprite = obs.type === 'tall_block' ? null : this.spritesheet.getSprite('block_01');
+      if (sprite && obs.type !== 'tall_block') {
+        ctx.drawImage(sprite, obs.x, obs.y, obs.w, obs.h);
+      } else {
+        drawBlock(ctx, obs.x, obs.y, obs.w, obs.h, theme, obs.type === 'tall_block');
+      }
+    }
     ctx.restore();
   }
 }
 
+function drawPortal(ctx, x, y, w, h, type, theme) {
+  const isGravity = type.includes('gravity');
+  const isShip = type.includes('ship');
+  const isBall = type.includes('ball');
+  const isCube = type.includes('cube');
+  
+  let color = '#ffffff';
+  if (isShip) color = '#78ff38';
+  else if (isBall) color = '#ff33ff';
+  else if (isCube) color = '#00d4ff';
+  else if (type === 'portal_gravity_up') color = '#ffff33';
+  else if (type === 'portal_gravity_down') color = '#3333ff';
+
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 4;
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 15;
+  
+  // Outer ring
+  ctx.beginPath();
+  ctx.ellipse(x + w/2, y + h/2, w/2, h/2, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  
+  // Inner glow
+  ctx.globalAlpha = 0.3;
+  ctx.fillStyle = color;
+  ctx.fill();
+  
+  // Particles/Dots inside
+  ctx.globalAlpha = 0.8;
+  ctx.fillStyle = '#ffffff';
+  for (let i = 0; i < 5; i++) {
+    const py = y + 20 + i * (h - 40) / 4;
+    ctx.beginPath();
+    ctx.arc(x + w/2, py, 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  
+  ctx.restore();
+}
+
+function drawOrb(ctx, x, y, w, h, type, theme) {
+  let color = '#ffffff';
+  if (type === 'orb_green') color = '#00ff00';
+  else if (type === 'orb_yellow') color = '#ffff00';
+  else if (type === 'orb_blue') color = '#0000ff';
+  else if (type === 'orb_red') color = '#ff0000';
+
+  ctx.save();
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 15;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.arc(x + w/2, y + h/2, w/2 - 4, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.globalAlpha = 0.4;
+  ctx.fillStyle = color;
+  ctx.fill();
+  
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.arc(x + w/2, y + h/2, w/6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
 export function createStars() {
-  return Array.from({ length: CONFIG.performance.stars }, () => ({
+  const pc = getPerfConfig();
+  const n = Math.min(CONFIG.performance.stars, pc.stars);
+  return Array.from({ length: Math.max(6, Math.floor(n)) }, () => ({
     x: Math.random() * CONFIG.W,
     y: Math.random() * (CONFIG.GROUND_Y - 24),
     r: 0.7 + Math.random() * 1.8,
@@ -203,7 +368,9 @@ export function createStars() {
 }
 
 export function createShapes() {
-  return Array.from({ length: CONFIG.performance.shapes }, (_, i) => ({
+  const pc = getPerfConfig();
+  const shapes = pc.bgShapes;
+  return Array.from({ length: Math.max(3, Math.floor(shapes)) }, (_, i) => ({
     x: Math.random() * CONFIG.W,
     y: 42 + Math.random() * (CONFIG.GROUND_Y - 110),
     size: 24 + Math.random() * 54,
@@ -250,7 +417,7 @@ function drawStars(ctx, stars, scroll, theme, beatFlash) {
     const x = wrap(star.x - scroll * 0.35 * star.depth, CONFIG.W);
     const alpha = clamp(0.36 + Math.sin(star.tw + twinkle) * 0.2 + beatFlash * 0.2, 0.1, 1);
     ctx.globalAlpha = alpha;
-    if (!CONFIG.performance.lowFx) {
+    if (!CONFIG.performance.lowFx && getPerfConfig().shadowBlur) {
       ctx.shadowColor = theme.primary;
       ctx.shadowBlur = 5 + beatFlash * 9;
     }
@@ -272,7 +439,7 @@ function drawParallaxShapes(ctx, shapes, scroll, theme, beatFlash) {
     ctx.globalAlpha = 0.18 + beatFlash * 0.22;
     ctx.strokeStyle = theme.primary;
     ctx.shadowColor = theme.primary;
-    ctx.shadowBlur = CONFIG.performance.lowFx ? 0 : 8 + beatFlash * 16;
+    ctx.shadowBlur = CONFIG.performance.lowFx || !getPerfConfig().shadowBlur ? 0 : 8 + beatFlash * 16;
     polygonPath(ctx, 0, 0, shape.size, shape.sides);
     ctx.stroke();
     ctx.restore();
@@ -282,7 +449,10 @@ function drawParallaxShapes(ctx, shapes, scroll, theme, beatFlash) {
 
 function drawFallbackCube(ctx, size, theme) {
   const half = size / 2;
-  ctx.fillStyle = theme.primary;
+  const isBossTheme = theme.primary === '#ff2288' || theme.fbC === '#880033';
+  const main = isBossTheme ? '#ff3030' : theme.primary;
+  const accent = isBossTheme ? '#00e5ff' : theme.accent;
+  ctx.fillStyle = main;
   ctx.strokeStyle = '#ffffff';
   ctx.lineWidth = 3;
   ctx.fillRect(-half, -half, size, size);
@@ -291,17 +461,63 @@ function drawFallbackCube(ctx, size, theme) {
   ctx.fillStyle = 'rgba(0,0,0,0.48)';
   ctx.fillRect(-half + 8, -half + 8, size - 16, size - 16);
 
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(-half + 9, -half + 10, 7, 7);
+  ctx.fillRect(half - 16, -half + 10, 7, 7);
+
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(-half + 9, half - 11);
+  ctx.lineTo(half - 9, half - 16);
+  ctx.stroke();
+}
+
+function drawFallbackShip(ctx, size, theme) {
+  const half = size / 2;
+  ctx.fillStyle = theme.primary;
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 3;
+  
+  // Body ship
+  ctx.beginPath();
+  ctx.moveTo(-half, 0);
+  ctx.lineTo(half, -half/2);
+  ctx.lineTo(half, half/2);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // Cockpit
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.beginPath();
+  ctx.arc(0, 0, half/2, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawFallbackBall(ctx, size, theme) {
+  const r = size / 2;
+  ctx.fillStyle = theme.primary;
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 3;
+  
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+
+  // Inner pattern
   ctx.fillStyle = theme.accent;
   ctx.beginPath();
-  ctx.arc(0, 0, 6, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.fillStyle = '#ffffff';
-  const dot = 4;
-  ctx.fillRect(-half + 5, -half + 5, dot, dot);
-  ctx.fillRect(half - 9, -half + 5, dot, dot);
-  ctx.fillRect(-half + 5, half - 9, dot, dot);
-  ctx.fillRect(half - 9, half - 9, dot, dot);
+  ctx.arc(0, 0, r * 0.7, 0, Math.PI * 2);
+  ctx.stroke();
+  
+  ctx.beginPath();
+  ctx.moveTo(-r, 0);
+  ctx.lineTo(r, 0);
+  ctx.moveTo(0, -r);
+  ctx.lineTo(0, r);
+  ctx.stroke();
 }
 
 function drawSpike(ctx, x, y, w, h, theme) {

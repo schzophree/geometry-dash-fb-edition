@@ -5,6 +5,10 @@ export class HUD {
     this.pauseButton = { x: CONFIG.W - 48, y: 12, w: 36, h: 36 };
   }
 
+  repositionPauseButton() {
+    this.pauseButton = { x: CONFIG.W - 48, y: 12, w: 36, h: 36 };
+  }
+
   draw(ctx, state) {
     const { score, level, theme, lives, checkpointActive, dangerDistance, beatFlash } = state;
     const danger = dangerDistance < 110;
@@ -17,12 +21,12 @@ export class HUD {
     ctx.shadowBlur = 10 + beatFlash * 12;
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 20px Pusab, Arial';
-    ctx.fillText(`Score ${Math.floor(score)}`, 18, 30);
+    ctx.fillText(`${Math.round(state.songProgress * 100)}%`, 18, 30);
     ctx.font = 'bold 12px Pusab, Arial';
     ctx.fillStyle = theme.primary;
     ctx.fillText(`${level.label} · ${level.diff}`, 18, 48);
 
-    drawProgress(ctx, score, level, theme, state.songProgress);
+    drawProgress(ctx, theme, state.songProgress);
     drawDanger(ctx, caution, danger, theme);
     drawPauseButton(ctx, this.pauseButton);
     drawLives(ctx, lives, checkpointActive);
@@ -35,15 +39,12 @@ export class HUD {
   }
 }
 
-function drawProgress(ctx, score, level, theme, songProgress = null) {
+function drawProgress(ctx, theme, songProgress = 0) {
   const x = CONFIG.W / 2 - 120;
   const y = 16;
   const w = 240;
   const h = 14;
-  const next = level.scoreEnd === Infinity ? level.scoreStart + 2200 : level.scoreEnd;
-  const progress = songProgress == null
-    ? clamp((score - level.scoreStart) / (next - level.scoreStart), 0, 1)
-    : clamp(songProgress, 0, 1);
+  const progress = clamp(songProgress, 0, 1);
 
   ctx.save();
   roundRect(ctx, x, y, w, h, 7);

@@ -56,9 +56,12 @@ export class AudioEngine {
   }
 
   async preload(onProgress = () => {}) {
+    console.log('[audio] starting preload...');
     this.ensureContext();
+    console.log('[audio] context ensured');
     console.log('[audio] lazy loading enabled; music decodes when a level starts');
     await this.preloadSfx();
+    console.log('[audio] sfx preloaded');
     onProgress(1);
   }
 

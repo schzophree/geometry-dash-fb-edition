@@ -108,6 +108,21 @@ const Renderer = (() => {
 
     ctx.fillStyle = accent;
     ctx.fillRect(-20, groundY, width + 40, 5 + pulse * 3);
+    
+    // FIX 3D: Visual beat sync - ground glow line
+    if (pulse > 0.05) {
+      ctx.save();
+      ctx.shadowColor = accent;
+      ctx.shadowBlur = Math.max(2, 8 + pulse * 15); // Spike from base to base*2.5
+      ctx.strokeStyle = accent;
+      ctx.lineWidth = 3 + pulse * 2;
+      ctx.beginPath();
+      ctx.moveTo(-20, groundY);
+      ctx.lineTo(width + 40, groundY);
+      ctx.stroke();
+      ctx.restore();
+    }
+    
     ctx.fillStyle = accent2;
     ctx.globalAlpha = 0.42 + pulse * 0.2;
     ctx.fillRect(-20, groundY + 8, width + 40, 2);

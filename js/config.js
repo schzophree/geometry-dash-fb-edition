@@ -8,11 +8,11 @@ export const CONFIG = {
   player: {
     x: 140,
     size: 36,
-    gravity: 0.95,
+    gravity: 0.74,
     jumpForce: -16.5,
     coyoteFrames: 0,
     trailLifeStep: 0.075,
-    invincibleFrames: 0,
+    invincibleFrames: 90,
     hitboxInset: 6,
   },
 
@@ -26,21 +26,22 @@ export const CONFIG = {
   },
 
   performance: {
-    stars: 30,
-    shapes: 6,
-    sparks: 30,
-    starterSparks: 18,
-    normalSparks: 20,
-    bossSparks: 30,
-    bossShards: 14,
-    caveTeeth: 18,
+    stars: 20,
+    shapes: 4,
+    sparks: 16,
+    starterSparks: 12,
+    normalSparks: 14,
+    bossSparks: 18,
+    bossShards: 8,
+    caveTeeth: 10,
     lowFx: true,
   },
 
   gameplay: {
     startLives: 5,
-    oneHitKill: true,
-    checkpointThresholds: [900, 2100],
+    oneHitKill: false,
+    /** true = gambar ikon cube vektor (mirip GD, stabil). false = bitmap dari atlas (butuh koordinat benar). */
+    useVectorCubeIcon: true,
   },
 
   heart: {
@@ -62,7 +63,7 @@ export const CONFIG = {
       {
         name: 'warningAlarm',
         file: 'geometry-dash-assets/warning-alarm-not-loud.mp3',
-        gain: 0.55,
+        gain: 0.80,
         delay: 0,
       },
       {
@@ -82,12 +83,25 @@ export const CONFIG = {
     maxAlpha: 0.82,
     bobAmplitude: 6,
     messages: [
-      ['ngapain ngoding,', 'mending scroll fesnuk 😂'],
+      ['ngapain ngoding,', 'mending scroll fesnuk 😹😹'],
       ['deadline besok?', 'ya scroll aja dulu 😌'],
       ['bug belum kelar?', 'fesnuk dulu 5 menit 🙃'],
       ['ngoding dari tadi,', 'istirahat fesnuk yuk 😴'],
-      ['error mulu,', 'udah buka fesnuk aja bro 💀'],
+      ['error mulu,', 'udah buka fesnuk aja ngab 💀'],
     ],
+  },
+
+  camera: {
+    shakeOnDeath: { intensity: 12, decay: 0.8 },
+    shakeOnTransition: { intensity: 8, decay: 0.9 },
+    shakeOnBassDrop: { intensity: 2, duration: 3 },
+  },
+
+  parallax: {
+    // FIX 3E: Parallax layers for depth effect
+    layer0: { speedMultiplier: 0.2, name: 'far' },     // Jauh: scroll 0.2× gameSpeed
+    layer1: { speedMultiplier: 0.5, name: 'mid' },     // Tengah: scroll 0.5× gameSpeed
+    layer2: { speedMultiplier: 1.0, name: 'near' },    // Dekat: scroll 1.0× gameSpeed (ground deco)
   },
 
   levels: [
@@ -96,21 +110,19 @@ export const CONFIG = {
       label: 'LEVEL 1',
       name: 'EASY',
       diff: 'EASY',
-      scoreStart: 0,
-      scoreEnd: 900,
       speed: 5.5,
       bpm: 140,
       obInterval: 90,
       obMin: 54,
       musicIndex: 0,
       theme: {
-        bg0: '#040d28',
+        bg0: '#050d28',
         bg1: '#091640',
-        bg2: '#071133',
+        bg2: '#060e2a',
         primary: '#00d4ff',
         accent: '#0088ff',
         gnd0: '#0d2045',
-        gnd1: '#08142f',
+        gnd1: '#07112a',
         line: '#00d4ff',
         obC: '#00ccff',
         obC2: '#0055cc',
@@ -122,21 +134,19 @@ export const CONFIG = {
       label: 'LEVEL 2',
       name: 'NORMAL',
       diff: 'NORMAL',
-      scoreStart: 900,
-      scoreEnd: 2100,
       speed: 6.5,
       bpm: 145,
       obInterval: 75,
       obMin: 44,
       musicIndex: 1,
       theme: {
-        bg0: '#180900',
+        bg0: '#1a0900',
         bg1: '#2a1200',
-        bg2: '#1e0b00',
+        bg2: '#1e0c00',
         primary: '#ffaa00',
         accent: '#ff6600',
-        gnd0: '#351500',
-        gnd1: '#1d0900',
+        gnd0: '#361400',
+        gnd1: '#1c0900',
         line: '#ffaa00',
         obC: '#ffaa00',
         obC2: '#ff4400',
@@ -147,30 +157,37 @@ export const CONFIG = {
       index: 2,
       label: 'LEVEL 3',
       name: 'BOSS',
-      diff: 'FINAL',
-      scoreStart: 2100,
-      scoreEnd: Infinity,
+      diff: 'BOSS',
       speed: 8.4,
       bpm: 200,
       obInterval: 56,
       obMin: 32,
       musicIndex: 2,
       theme: {
-        bg0: '#120000',
-        bg1: '#2a0000',
-        bg2: '#0a0000',
-        primary: '#ff2244',
-        accent: '#ffcc55',
-        gnd0: '#300000',
-        gnd1: '#100000',
-        line: '#ff2244',
-        obC: '#ffcc55',
-        obC2: '#ff3300',
-        fbC: '#cc0000',
+        bg0: '#100008',
+        bg1: '#1a000e',
+        bg2: '#120008',
+        primary: '#ff2288',
+        accent: '#ffffff',
+        gnd0: '#2a0012',
+        gnd1: '#160008',
+        line: '#ff2288',
+        obC: '#ff2288',
+        obC2: '#aa0055',
+        fbC: '#880033',
       },
     },
   ],
 };
+
+/** Sesuaikan resolusi logika dengan pixel buffer canvas (FIX 2). */
+export function syncCanvasLayout(canvas) {
+  if (!canvas || !canvas.width) return;
+  CONFIG.W = canvas.width;
+  CONFIG.H = canvas.height;
+  CONFIG.GROUND_Y = canvas.height - Math.round(canvas.height * 0.145);
+  CONFIG.player.x = Math.round(canvas.width * 0.175);
+}
 
 export function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -184,18 +201,32 @@ export function randInt(min, max) {
   return Math.floor(rand(min, max + 1));
 }
 
-export function getLevelIndexForScore(score) {
-  let index = 0;
-  for (const level of CONFIG.levels) {
-    if (score >= level.scoreStart) index = level.index;
-  }
-  return index;
-}
-
 export function getLevel(index) {
   return CONFIG.levels[clamp(index, 0, CONFIG.levels.length - 1)];
 }
 
-export function getLevelForScore(score) {
-  return getLevel(getLevelIndexForScore(score));
+export function intersects(a, b) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 }
+
+// Collision detection: Rectangle vs Ellipse
+// Used for player (rect) hitting portals (ellipse)
+export function intersectsEllipse(rectHitbox, ellipseObs) {
+  const ellipseCenterX = ellipseObs.x + ellipseObs.w / 2;
+  const ellipseCenterY = ellipseObs.y + ellipseObs.h / 2;
+  const ellipseRadiusX = ellipseObs.w / 2;
+  const ellipseRadiusY = ellipseObs.h / 2;
+
+  // Find the closest point on the rectangle to the ellipse center
+  let closestX = Math.max(rectHitbox.x, Math.min(ellipseCenterX, rectHitbox.x + rectHitbox.w));
+  let closestY = Math.max(rectHitbox.y, Math.min(ellipseCenterY, rectHitbox.y + rectHitbox.h));
+
+  // Calculate distance between closest point and ellipse center
+  const dx = ellipseCenterX - closestX;
+  const dy = ellipseCenterY - closestY;
+
+  // Normalize to ellipse space and check if distance <= 1 (inside ellipse)
+  const distSquared = (dx / ellipseRadiusX) ** 2 + (dy / ellipseRadiusY) ** 2;
+  return distSquared <= 1;
+}
+

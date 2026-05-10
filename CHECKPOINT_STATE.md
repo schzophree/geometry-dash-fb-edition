@@ -10,10 +10,10 @@ Game memakai struktur modular ES Modules di folder `js/`. Entry point utama teta
 Mode gameplay terbaru mengikuti `GEOMETRY_DASH_IMPROVEMENTS.md`:
 
 - Physics lebih berat: gravity `0.95`, jump force `-16.5`.
-- `coyoteFrames = 0`, `invincibleFrames = 0`.
+- `coyoteFrames = 0`, dan invincible kembali aktif 90 frame setelah kena hit.
 - Speed/interval level dibuat konstan, tidak naik otomatis per frame.
-- `CONFIG.gameplay.oneHitKill = true`, jadi tabrakan langsung game over.
-- Heart item dan HUD hati lama nonaktif saat `oneHitKill` aktif.
+- Sistem nyawa kembali aktif: mulai dari 5 nyawa.
+- Heart item kembali spawn random di gameplay dan menambah nyawa saat dikumpulkan.
 
 ## Level Aktif
 
@@ -91,11 +91,19 @@ Saat checkpoint transisi level aktif, game menampilkan flash putih singkat, wipe
 Level 3 BOSS sekarang memakai sistem manual mapping:
 
 - `js/level-data.js`: timeline `BOSS_MAPPING` berbasis detik lagu.
-- `js/boss.js`: `CyberDemonBoss`, trigger system, visual boss, laser, pillar, mouth vortex, dan like burst.
+- `js/boss.js`: `CyberDemonBoss`, trigger system, visual boss, laser, pillar, floor spikes, block stack, mouth vortex, dan like burst.
 - `js/audio.js`: `audio.currentTime()` menjadi source of truth untuk beat sync.
 - `js/main.js`: update/draw boss hanya saat `currentLevelIndex === 2`.
 
 Boss memakai crop sprite dari `GJ_GameSheet02-hd.png` melalui asset loader kalau file di `geometry-dash-assets\geometry-dash-assets` tersedia. Jika spritesheet gagal load, visual tetap jalan dengan Canvas fallback.
+
+Boss art utama sekarang memakai `assets/images/boss/cyber-demon-fb.png`, hasil resize dari file Gemini user. Canvas fallback di `js/boss.js` hanya dipakai kalau asset gambar gagal dimuat.
+
+Mapping boss sekarang diperpanjang sampai detik 180 lewat `ENDURANCE_MAPPING`. Jika lagu masih lebih panjang dari itu, `CyberDemonBoss.spawnAutoHazards()` tetap membuat floor spikes, block stack, pillar, laser warning/fire, dan like burst secara beat-synced supaya pertengahan sampai akhir level tidak kosong.
+
+## Finish Boss
+
+Saat lagu boss selesai, game masuk state `complete`, audio berhenti, dan canvas menampilkan teks `LEVEL COMPLETE!`. `ENTER` atau tap mengembalikan player ke menu.
 
 ## File Penting
 

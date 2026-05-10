@@ -2,7 +2,7 @@
 // VISUAL-EFFECTS.JS — Efek Visual Overlay & Screen Shake
 // ============================================================
 
-const VisualEffects = (() => {
+export const VisualEffects = (() => {
   let screenShakeIntensity = 0;
   let screenShakeTime = 0;
   let bossBurstIntensity = 0;

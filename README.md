@@ -58,8 +58,8 @@ music/
 - Level baru hanya aktif setelah score threshold tercapai dan lagu level aktif selesai minimal sekali
 - Checkpoint sesi saat transisi level, tanpa `localStorage`
 - Resume dari checkpoint di layar game over
-- Mode GD asli: 1-hit kill aktif lewat `CONFIG.gameplay.oneHitKill`
-- Heart item dan sistem nyawa lama otomatis nonaktif saat `oneHitKill` aktif
+- Mulai dengan 5 nyawa; kena obstacle, laser boss, atau Facebook mengurangi 1 nyawa
+- Heart item random muncul di gameplay dan menambah nyawa saat diambil
 - Missing assets memakai fallback Canvas
 - Audio lazy-load per level agar startup lebih ringan; missing music memakai synthesized EDM beat dari Web Audio API
 - SFX layered saat masuk checkpoint BOSS
@@ -71,3 +71,5 @@ music/
 - Transisi level memakai flash + wipe neon singkat saat checkpoint level baru aktif
 - Level BOSS memakai manual mapping di `js/level-data.js`, Boss Manager di `js/boss.js`, dan sinkron ke `audio.currentTime()`
 - Boss Cyber-Demon FB memakai crop sprite dari `GJ_GameSheet02-hd.png` jika spritesheet tersedia
+- Boss level punya obstacle manual: floor spikes, block stack, pillar, laser, dan finish `LEVEL COMPLETE!`
+- Boss art memakai `assets/images/boss/cyber-demon-fb.png`; setelah mapping utama habis, boss tetap spawn auto-hazard beat-synced

@@ -1,11 +1,5 @@
-import { CONFIG, rand, randInt } from './config.js';
-
-const POOLS = [
-  ['singleSpike', 'singleBlock', 'doubleSpike', 'singleSpike', 'blockGap'],
-  ['doubleSpike', 'singleBlock', 'tall', 'step', 'spikeBlock', 'blockGap'],
-  ['doubleSpike', 'tripleSpike', 'step', 'tall', 'spikeBlock', 'doubleBlock'],
-  ['tripleSpike', 'step', 'tallPair', 'spikeBlock', 'doubleBlock', 'hardMix'],
-];
+import { CONFIG, rand, randInt, intersects, intersectsEllipse } from './config.js';
+import { GET_LEVEL_MAPPING } from './level-data.js';
 
 export class ObstacleManager {
   constructor() {
@@ -17,31 +11,72 @@ export class ObstacleManager {
     this.hearts = [];
     this.collectParticles = [];
     this.floatTexts = [];
-    this.spawnTimer = 0;
+    this.eventIndex = 0;
     this.heartTimer = 0;
     this.nextHeart = randInt(CONFIG.heart.spawnMin, CONFIG.heart.spawnMax);
   }
 
+  /** Lompati event level yang sudah lewat (resume checkpoint, tanpa spawn). */
+  fastForwardAudioTime(levelIndex, audioTime) {
+    const mapping = GET_LEVEL_MAPPING(levelIndex);
+    while (this.eventIndex < mapping.length && mapping[this.eventIndex].time <= audioTime) {
+      this.eventIndex++;
+    }
+  }
+
   update(dt, level, gameSpeed, obInterval, playerHitbox, frame, options = {}) {
-    const spawnObstacles = options.spawnObstacles !== false;
-    this.spawnTimer += dt;
-    if (spawnObstacles && this.spawnTimer >= obInterval) {
-      this.spawnPattern(level);
-      this.spawnTimer = 0;
-    } else if (!spawnObstacles) {
-      this.spawnTimer = 0;
+    const audioTime = options.audioTime || 0;
+    const mapping = GET_LEVEL_MAPPING(level.index);
+
+    // Process mapping based on audioTime
+    while (this.eventIndex < mapping.length && audioTime >= mapping[this.eventIndex].time) {
+      this.spawnEvent(mapping[this.eventIndex]);
+      this.eventIndex++;
+    }
+
+    if (options.spawnObstacles && this.eventIndex >= mapping.length) {
+      if (this.obTimer === undefined) this.obTimer = 0;
+      this.obTimer += dt;
+      
+      // FIX 3C: Beat-based obstacle spawning
+      // Calculate spawn interval in seconds based on beat information
+      // obInterval is in frames at 60fps, convert to dt scale
+      const spawnIntervalSeconds = obInterval / 60.0;
+      
+      if (this.obTimer >= spawnIntervalSeconds) {
+        this.obTimer -= spawnIntervalSeconds; // Keep remainder for precise timing
+        
+        // FIX 3B: Variation in spawning (1 beat, 2 beats, or 4 beats)
+        const variation = Math.random();
+        let shouldSpawn = false;
+        
+        if (variation < 0.5) {
+          // 50% chance: spawn now
+          shouldSpawn = true;
+        } else if (variation < 0.8 && this.obTimer < spawnIntervalSeconds * 0.5) {
+          // 30% chance: skip 1 beat, will spawn next interval
+          shouldSpawn = false;
+        } else {
+          // 20% chance: spawn
+          shouldSpawn = true;
+        }
+        
+        if (shouldSpawn) {
+          const types = ['spike', 'spike_double', 'block', 'block_double', 'tall_block', 'stair_up'];
+          const type = types[randInt(0, types.length - 1)];
+          this.spawnEvent({ type });
+        }
+      }
     }
 
     for (const obs of this.obstacles) obs.x -= gameSpeed * dt;
-    this.obstacles = this.obstacles.filter((obs) => obs.x + obs.w > -80);
+    this.obstacles = this.obstacles.filter((obs) => obs.x + obs.w > -100);
 
-    if (!CONFIG.gameplay.oneHitKill) {
-      this.heartTimer += dt;
-      if (this.heartTimer >= this.nextHeart) {
-        this.spawnHeart();
-        this.heartTimer = 0;
-        this.nextHeart = randInt(CONFIG.heart.spawnMin, CONFIG.heart.spawnMax);
-      }
+    this.heartTimer += dt;
+    if (this.heartTimer >= this.nextHeart) {
+      this.spawnHeart();
+      this.heartTimer = 0;
+      this.nextHeart = randInt(CONFIG.heart.spawnMin, CONFIG.heart.spawnMax);
     }
 
     for (const heart of this.hearts) {
@@ -57,60 +92,78 @@ export class ObstacleManager {
     return collected;
   }
 
-  spawnPattern(level) {
-    const pool = POOLS[level.index] || POOLS[0];
-    const name = pool[Math.floor(Math.random() * pool.length)];
-    const x = CONFIG.W + 22;
+  spawnEvent(event) {
+    const x = CONFIG.W + 20;
     const g = CONFIG.GROUND_Y;
-    const add = (type, dx, w, h, y = g - h) => this.obstacles.push({ type, x: x + dx, y, w, h });
+    /** Portal/orb di jalur lompat (dekat tanah), bukan setengah layar. */
+    const portalTop = (h) => Math.round(Math.max(40, g - h - 50));
+    const orbTop = (h) => Math.round(Math.max(48, g - h - 55));
 
-    switch (name) {
-      case 'singleSpike':
-        add('spike', 0, 28, 34);
+    const add = (type, dx, w, h, y = g - h) => {
+      const o = { type, x: x + dx, y, w, h, inactive: false };
+      if (type.startsWith('portal_')) o.lastTriggered = 0;
+      this.obstacles.push(o);
+    };
+
+    switch (event.type) {
+      case 'spike':
+        add('spike', 0, 30, 34);
         break;
-      case 'singleBlock':
-        add('block', 0, 36, 36);
+      case 'spike_double':
+        add('spike', 0, 30, 34);
+        add('spike', 32, 30, 34);
         break;
-      case 'doubleSpike':
-        add('spike', 0, 28, 34);
-        add('spike', 31, 28, 34);
+      case 'spike_triple':
+        add('spike', 0, 30, 34);
+        add('spike', 32, 30, 34);
+        add('spike', 64, 30, 34);
         break;
-      case 'tripleSpike':
-        add('spike', 0, 28, 34);
-        add('spike', 31, 28, 34);
-        add('spike', 62, 28, 34);
+      case 'block':
+        add('block', 0, 38, 38);
         break;
-      case 'tall':
-        add('tall', 0, 36, 72);
+      case 'block_double':
+        add('block', 0, 38, 38);
+        add('block', 42, 38, 38);
         break;
-      case 'step':
-        add('block', 0, 36, 36);
-        add('block', 36, 36, 36, g - 72);
+      case 'tall_block':
+        add('block', 0, 38, 76);
         break;
-      case 'spikeBlock':
-        add('spike', 0, 28, 34);
-        add('block', 46, 36, 36);
+      case 'stair_up':
+        add('block', 0, 38, 38);
+        add('block', 40, 38, 76);
+        add('block', 80, 38, 114);
         break;
-      case 'blockGap':
-        add('block', 0, 36, 36);
-        add('spike', 76, 28, 34);
+      case 'pillar':
+        const py = event.position === 'top' ? 64 : g - 120;
+        add('pillar', 0, 42, 120, py);
         break;
-      case 'doubleBlock':
-        add('block', 0, 36, 36);
-        add('block', 40, 36, 36);
+      case 'PORTAL_SHIP':
+        add('portal_ship', 0, 46, 100, portalTop(100));
         break;
-      case 'tallPair':
-        add('tall', 0, 36, 72);
-        add('spike', 55, 28, 34);
+      case 'PORTAL_CUBE':
+        add('portal_cube', 0, 46, 100, portalTop(100));
         break;
-      case 'hardMix':
-        add('spike', 0, 28, 34);
-        add('spike', 32, 28, 34);
-        add('block', 86, 36, 36);
-        add('spike', 132, 28, 34);
+      case 'PORTAL_BALL':
+        add('portal_ball', 0, 46, 100, portalTop(100));
         break;
-      default:
-        add('spike', 0, 28, 34);
+      case 'PORTAL_GRAVITY_UP':
+        add('portal_gravity_up', 0, 46, 100, portalTop(100));
+        break;
+      case 'PORTAL_GRAVITY_DOWN':
+        add('portal_gravity_down', 0, 46, 100, portalTop(100));
+        break;
+      case 'orb_yellow':
+        add('orb_yellow', 0, 36, 36, orbTop(36));
+        break;
+      case 'orb_green':
+        add('orb_green', 0, 36, 36, orbTop(36));
+        break;
+      case 'orb_blue':
+        add('orb_blue', 0, 36, 36, orbTop(36));
+        break;
+      case 'orb_red':
+        add('orb_red', 0, 36, 36, orbTop(36));
+        break;
     }
   }
 
@@ -163,7 +216,7 @@ export class ObstacleManager {
     this.floatTexts.push({
       x,
       y,
-      text: '+1 ❤️',
+      text: '+1❤️',
       age: 0,
       life: 60,
     });
@@ -187,21 +240,29 @@ export class ObstacleManager {
 
   collidesWithPlayer(playerHitbox) {
     for (const obs of this.obstacles) {
-      const inset = obs.type === 'spike' ? 7 : 4;
-      const box = {
-        x: obs.x + inset,
-        y: obs.y + inset,
-        w: obs.w - inset * 2,
-        h: obs.h - inset,
-      };
-      if (intersects(playerHitbox, box)) return obs;
+      if (obs.inactive) continue; // Skip already collected utility items
+
+      const isUtility = obs.type.startsWith('portal_') || obs.type.startsWith('orb_');
+      
+      if (isUtility) {
+        if (intersectsEllipse(playerHitbox, obs)) return { type: 'utility', obs };
+      } else {
+        const inset = obs.type === 'spike' ? 7 : 4;
+        const box = {
+          x: obs.x + inset,
+          y: obs.y + inset,
+          w: obs.w - inset * 2,
+          h: obs.h - inset,
+        };
+        if (intersects(playerHitbox, box)) return { type: 'lethal', obs };
+      }
     }
     return null;
   }
 
   draw(ctx, assets, theme, beatFlash, frame) {
     for (const obs of this.obstacles) {
-      assets.drawObstacle(ctx, obs, theme, beatFlash);
+      if (!obs.inactive) assets.drawObstacle(ctx, obs, theme, beatFlash);
     }
 
     for (const heart of this.hearts) {
@@ -241,8 +302,4 @@ export class ObstacleManager {
       ctx.restore();
     }
   }
-}
-
-export function intersects(a, b) {
-  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 }
