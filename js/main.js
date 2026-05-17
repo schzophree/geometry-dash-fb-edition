@@ -1,17 +1,17 @@
-import { CONFIG, clamp, getLevel, syncCanvasLayout } from './config.js';
-import { perfSampleFrame, resetPerfSampling, getPerfConfig } from './perf.js';
-import { VisualEffects } from './visual-effects.js';
-import { AssetLoader, blendThemes, createShapes, createStars } from './assets.js';
-import { AudioEngine } from './audio.js';
-import { Player } from './player.js';
-import { ObstacleManager } from './obstacles.js';
-import { FacebookChaser } from './facebook.js';
-import { GhostStatus } from './ghost.js';
-import { HUD } from './hud.js';
-import { Screens } from './screens.js';
-import { createStageArt, drawStageBack, drawStageFront } from './stage-art.js';
-import { CyberDemonBoss } from './boss.js';
-import { BOSS_MAPPING } from './level-data.js';
+import { CONFIG, clamp, getLevel, syncCanvasLayout } from './config.js?v=7';
+import { perfSampleFrame, resetPerfSampling, getPerfConfig } from './perf.js?v=7';
+import { VisualEffects } from './visual-effects.js?v=7';
+import { AssetLoader, blendThemes, createShapes, createStars } from './assets.js?v=7';
+import { AudioEngine } from './audio.js?v=7';
+import { Player } from './player.js?v=7';
+import { ObstacleManager } from './obstacles.js?v=7';
+import { FacebookChaser } from './facebook.js?v=7';
+import { GhostStatus } from './ghost.js?v=7';
+import { HUD } from './hud.js?v=7';
+import { Screens } from './screens.js?v=7';
+import { createStageArt, drawStageBack, drawStageFront } from './stage-art.js?v=7';
+import { CyberDemonBoss } from './boss.js?v=7';
+import { BOSS_MAPPING } from './level-data.js?v=7';
 
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
@@ -29,6 +29,7 @@ let obInterval = getLevel(0).obInterval;
 let checkpoint = null;
 let shownCheckpoints = new Set();
 let isJumpHeld = false;
+let jumpBufferTimer = 0;
 let frame = 0;
 let lastTime = performance.now();
 let bgScroll = 0;
@@ -68,18 +69,20 @@ if (devParams.has('level')) {
   obInterval = previewLevel.obInterval;
 }
 
+// --- Initialization ---
 resizeCanvas();
 window.addEventListener('resize', resizeCanvas);
-
 bindUI();
 requestAnimationFrame(loop);
-window.addEventListener('load', () => {
-  bootstrap();
+
+bootstrap().catch((err) => {
+  console.error('[FATAL] Bootstrap failed:', err);
+  const loadingText = document.getElementById('loadingText');
+  if (loadingText) loadingText.textContent = 'Gagal memuat game! Cek Console (F12).';
 });
 
 async function bootstrap() {
   console.log('[bootstrap] starting...');
-
   try {
     assets = new AssetLoader();
     audio = new AudioEngine(window.MUSIC_LIST || []);
@@ -96,40 +99,42 @@ async function bootstrap() {
     console.log('[bootstrap] objects initialized');
 
     screens.setTheme(getLevel(0).theme);
-    console.log('[bootstrap] theme set');
     drawLoadingFrame();
-    console.log('[bootstrap] loading frame drawn');
 
     await Promise.all([
-      assets.preload((progress, key) => {
+      assets.preload((progress) => {
         assetProgress = progress;
-        console.log(`[assets] progress: ${Math.round(progress*100)}% (${key})`);
         updateProgress();
       }),
       audio.preload((progress) => {
         audioProgress = progress;
-        console.log(`[audio] progress: ${Math.round(progress*100)}%`);
         updateProgress();
       }),
     ]);
     console.log('[bootstrap] preload finished');
   } catch (err) {
     console.error('[bootstrap] error during initialization:', err);
-    return;
+    throw err;
   }
 
   state = 'start';
   screens.hideLoading();
   setStartPreviewLevel(selectedLevel);
   screens.showStart(selectedLevel, assets.logo);
+
   if (devParams.has('autostart')) {
     startGame({ levelIndex: selectedLevel, clearCheckpoint: true });
   }
   console.log('[game] ready');
 }
 
+window.startGame = () => {
+  if (state === 'start') startGame({ levelIndex: selectedLevel, clearCheckpoint: true });
+};
+
 function updateProgress() {
-  if (screens) screens.showLoading(assetProgress * 0.72 + audioProgress * 0.28);
+  const pct = Math.round((assetProgress * 0.72 + audioProgress * 0.28) * 100);
+  screens.showLoading(pct / 100);
 }
 
 function getMusicEntryForLevel(levelIndex) {
@@ -140,7 +145,7 @@ function getMusicEntryForLevel(levelIndex) {
 }
 
 function checkAndSaveCheckpoint() {
-  if (currentLevelIndex < 1) return;
+  if (currentLevelIndex < 1 || currentLevelIndex === 2) return;
   const ml = getMusicEntryForLevel(currentLevelIndex);
   if (!ml || ml.scoreEnd == null) return;
 
@@ -162,7 +167,8 @@ function checkAndSaveCheckpoint() {
         obInterval,
         audioTime: audio.currentTime(),
       });
-      screens?.checkpoint();
+      // Hanya tampilkan tulisan CHECKPOINT di level BOSS, level 2 diam-diam saja
+      if (currentLevelIndex !== 1) screens?.checkpoint();
       console.log(`[Checkpoint] Saved at ${Math.round(progress * 100)}%`, { ...progressCheckpoint });
       break;
     }
@@ -257,7 +263,7 @@ function updatePlaying(dt) {
   try {
     beatHit = Boolean(audio.detectBeat(level.bpm));
   } catch (e) {
-    console.warn('[Audio] detectBeat (non-fatal):', e);
+    console.warn('[Audio] detectBeat error:', e);
   }
   if (beatHit) {
     beatFlash = 1;
@@ -265,37 +271,32 @@ function updatePlaying(dt) {
   }
   const audioTime = audio.currentTime();
 
-  score += 1; // Tetap ada untuk statistik ringan
+  score += CONFIG.SCORE_PER_FRAME;
   checkAndSaveCheckpoint();
   handleLevelTransition();
 
   const activeLevel = getLevel(currentLevelIndex);
-  
-  // FIX 3A: Implement speed scaling every 300 score points
   const baseSpeed = activeLevel.speed;
   const speedBoostStages = Math.floor(score / 300);
-  const speedIncrementPerStage = 0.3; // Smooth increment
-  gameSpeed = baseSpeed + (speedBoostStages * speedIncrementPerStage);
-  
-  // Cap speed at level maximum (usually scoreEnd level * 0.01 or manually set)
-  const maxSpeedForLevel = baseSpeed + 3.0; // Usually cap around +3 from base
-  gameSpeed = Math.min(gameSpeed, maxSpeedForLevel);
-  
+  const speedIncrementPerStage = 0.3;
+  gameSpeed = Math.min(baseSpeed + speedBoostStages * speedIncrementPerStage, baseSpeed + 3.0);
   obInterval = activeLevel.obInterval;
   bgScroll += gameSpeed * dt;
 
-  // Player update moved after solid floor calc
-
   const collected = obstacles.update(dt, activeLevel, gameSpeed, obInterval, player.hitbox(), frame, {
-    spawnObstacles: activeLevel.index !== 2,
-    audioTime: audioTime, // Kirim audioTime ke obstacle manager
+    spawnObstacles: true,
+    audioTime: audioTime,
+    playerGravity: player.gravity,
   });
   if (collected > 0) {
     lives += collected;
     screenShake = Math.max(screenShake, 2.2);
   }
 
-  facebook.update(player, gameSpeed, audioTime * 60, frame);
+  if (CONFIG.gameplay.facebookChaserEnabled) {
+    facebook.update(player, gameSpeed, audioTime * 60, frame);
+  }
+
   if (activeLevel.index === 2) {
     cyberBoss.update(dt, audioTime, beatFlash, player.hitbox());
     screenShake = Math.max(screenShake, cyberBoss.takeShake());
@@ -304,59 +305,93 @@ function updatePlaying(dt) {
   updateImpactParticles(dt);
 
   const hitObs = obstacles.collidesWithPlayer(player.hitbox());
-  
-  // Calculate solid floor
   let solidFloorY = CONFIG.GROUND_Y;
+  let solidCeilingY = 0; // Default level ceiling boundary
+
   for (const obs of obstacles.obstacles) {
     if (obs.inactive || obs.type.startsWith('portal_') || obs.type.startsWith('orb_') || obs.type === 'spike') continue;
     
-    // Check if player is horizontally above the block
     if (player.x + player.size > obs.x && player.x < obs.x + obs.w) {
-      // Check if player's bottom is roughly at or slightly above the block's top
-      if (player.y + player.size <= obs.y + 12 && player.vy >= 0) {
-        solidFloorY = Math.min(solidFloorY, obs.y);
+      if (obs.type === 'trampoline') {
+        if (player.gravity === 1 && player.y + player.size <= obs.y + 14 && player.vy >= 0) {
+          solidFloorY = Math.min(solidFloorY, obs.y);
+        }
+      } else if (obs.type === 'triangle_step') {
+        const progress = Math.max(0, Math.min(1, (player.x + player.size - obs.x) / obs.w));
+        let stepY;
+        if (obs.direction === 'up') {
+          stepY = obs.y + obs.h - (progress * obs.h);
+        } else {
+          stepY = obs.y + (progress * obs.h);
+        }
+        if (player.gravity === 1 && player.y + player.size <= stepY + 14 && player.vy >= 0) {
+          solidFloorY = Math.min(solidFloorY, stepY);
+        }
+      } else {
+        if (player.gravity === 1 && player.y + player.size <= obs.y + 12 && player.vy >= 0) {
+          solidFloorY = Math.min(solidFloorY, obs.y);
+        } else if (player.gravity === -1 && player.y >= obs.y + obs.h - 12 && player.vy <= 0) {
+          solidCeilingY = Math.max(solidCeilingY, obs.y + obs.h);
+        }
       }
     }
   }
-  
-  player.update(isJumpHeld, solidFloorY);
+
+  const wantsToJump = isJumpHeld || jumpBufferTimer > 0;
+  if (jumpBufferTimer > 0) {
+    jumpBufferTimer -= dt * 16.666;
+  }
+
+  // Handle jump input + play SFX
+  const oldVy = player.vy;
+  player.update(wantsToJump, solidFloorY, solidCeilingY);
+  // Detect if jump actually occurred (velocity changed towards jump direction)
+  const jumped = (player.gravity === 1 && player.vy < 0 && (oldVy >= 0 || player.justLanded)) ||
+                 (player.gravity === -1 && player.vy > 0 && (oldVy <= 0 || player.justLanded));
+
+  if (wantsToJump && jumped) {
+    if (!player.wasOnGround && !player.onGround && !player.onCeiling && player.coyote <= 0 && player.mode !== 'ship') {
+       // already jumping
+    } else {
+        jumpBufferTimer = 0; // Clear buffer
+    }
+  }
 
   if (hitObs) {
     if (hitObs.type === 'utility') {
       const obs = hitObs.obs;
-      if (utilityCollisionLock) {
-        /* cegah double-trigger orb/portal sama frame */
-      } else if (obs.type.startsWith('portal_')) {
-        const nowP = performance.now();
-        if (nowP - (obs.lastTriggered || 0) < 1000) {
-          /* portal cooldown */
-        } else {
-          obs.lastTriggered = nowP;
-          utilityCollisionLock = true;
-          handlePortal(obs.type);
-          obs.inactive = true;
-          window.setTimeout(() => {
-            utilityCollisionLock = false;
-          }, 300);
-        }
-      } else if (obs.type.startsWith('orb_')) {
-        if (isJumpHeld) {
-          utilityCollisionLock = true;
-          handleOrb(obs.type);
-          obs.inactive = true;
-          screenShake = Math.max(screenShake, 3);
-          beatFlash = 1;
-          window.setTimeout(() => {
-            utilityCollisionLock = false;
-          }, 300);
-        } else {
-          obs.primed = true;
+      if (!utilityCollisionLock) {
+        if (obs.type.startsWith('portal_')) {
+          const nowP = performance.now();
+          if (nowP - (obs.lastTriggered || 0) >= 1000) {
+            obs.lastTriggered = nowP;
+            utilityCollisionLock = true;
+            handlePortal(obs.type);
+            obs.inactive = true;
+            setTimeout(() => (utilityCollisionLock = false), 300);
+          }
+        } else if (obs.type.startsWith('orb_')) {
+          if (isJumpHeld) {
+            utilityCollisionLock = true;
+            handleOrb(obs.type);
+            obs.inactive = true;
+            screenShake = Math.max(screenShake, 3);
+            beatFlash = 1;
+            setTimeout(() => (utilityCollisionLock = false), 300);
+          } else {
+            obs.primed = true;
+          }
         }
       }
+    } else if (hitObs.type === 'springpad') {
+      // Trampoline bounce
+      player.vy = -hitObs.obs.springPower;
+      screenShake = Math.max(screenShake, 2);
+      beatFlash = 0.6;
     } else if (hitObs.type === 'lethal' && !player.isInvincible()) {
       applyDamage('Kena rintangan neon.');
     }
-  } else if (!player.isInvincible() && facebook.caught(player)) {
+  } else if (CONFIG.gameplay.facebookChaserEnabled && !player.isInvincible() && facebook.caught(player)) {
     triggerGameOver('Logo Fesnuk berhasil nyentuh cube.');
     facebook.reset();
   }
@@ -370,52 +405,37 @@ function updatePlaying(dt) {
 }
 
 function handleOrb(type) {
-  // FIX 1: Green orb and other orb behaviors with proper visual feedback
   if (type === 'orb_yellow') {
-    player.jump(-14.2); // Normal jump force
-    VisualEffects.beatPulse(0.6); // Yellow glow
+    player.jump(-14.2);
+    VisualEffects.beatPulse(0.6);
   } else if (type === 'orb_green') {
-    player.jump(-16.0); // Strong jump (boost)
-    VisualEffects.beatPulse(1.0); // Green glow - more intense
+    player.jump(-16.0);
+    VisualEffects.beatPulse(1.0);
     screenShake = Math.max(screenShake, 4);
   } else if (type === 'orb_blue') {
-    // Blue orb: flip gravity AND jump
     player.jump(-12.0);
     player.gravity *= -1;
-    VisualEffects.beatPulse(0.8); // Blue glow
+    VisualEffects.beatPulse(0.8);
   } else if (type === 'orb_red') {
-    player.jump(-18.0); // Very strong jump
-    VisualEffects.beatPulse(0.9); // Red glow
+    player.jump(-18.0);
+    VisualEffects.beatPulse(0.9);
     screenShake = Math.max(screenShake, 5);
   }
 }
 
 function handlePortal(type) {
-  if (type === 'portal_ship' && player.mode !== 'ship') {
-    console.log('[game] portal: entering SHIP mode');
-    player.setMode('ship');
-  } else if (type === 'portal_cube' && player.mode !== 'cube') {
-    console.log('[game] portal: back to CUBE mode');
-    player.setMode('cube');
-  } else if (type === 'portal_ball' && player.mode !== 'ball') {
-    console.log('[game] portal: switching to BALL mode');
-    player.setMode('ball');
-  } else if (type === 'portal_gravity_up' && player.gravity !== -1) {
-    console.log('[game] portal: GRAVITY UP');
-    player.setGravity(-1);
-  } else if (type === 'portal_gravity_down' && player.gravity !== 1) {
-    console.log('[game] portal: GRAVITY DOWN');
-    player.setGravity(1);
-  }
+  if (type === 'portal_ship' && player.mode !== 'ship') player.setMode('ship');
+  else if (type === 'portal_cube' && player.mode !== 'cube') player.setMode('cube');
+  else if (type === 'portal_ball' && player.mode !== 'ball') player.setMode('ball');
+  else if (type === 'portal_gravity_up' && player.gravity !== -1) player.setGravity(-1);
+  else if (type === 'portal_gravity_down' && player.gravity !== 1) player.setGravity(1);
 }
 
 function handleLevelTransition() {
   if (!audio.songFinishedOnce()) return;
-
   lastProgressCpThreshold = -1;
-
   const nextIndex = currentLevelIndex + 1;
-  
+
   if (nextIndex >= CONFIG.levels.length) {
     triggerLevelComplete();
     return;
@@ -424,53 +444,39 @@ function handleLevelTransition() {
   const nextLevel = getLevel(nextIndex);
   gameSpeed = nextLevel.speed;
   obInterval = nextLevel.obInterval;
-  
-  // Update checkpoint
+
   checkpoint = {
     level: nextIndex,
     score: score,
-    fbX: facebook.x,
+    lives,
     gameSpeed,
     obInterval,
-    lives,
+    audioTime: 0
   };
 
   if (!shownCheckpoints.has(nextIndex)) {
     shownCheckpoints.add(nextIndex);
     screens.checkpoint();
-    // FIX 3E: Camera shake on level transition
-    const transitionShake = CONFIG.camera.shakeOnTransition;
-    screenShake = Math.max(screenShake, transitionShake.intensity);
+    screenShake = Math.max(screenShake, CONFIG.camera.shakeOnTransition.intensity);
   }
 
   const previousTheme = getLevel(currentLevelIndex).theme;
   currentLevelIndex = nextIndex;
   const level = getLevel(currentLevelIndex);
   if (level.name === 'BOSS') audio.playBossCheckpointCue();
-  
-  transition = {
-    from: previousTheme,
-    to: level.theme,
-    started: performance.now(),
-    duration: 800,
-  };
-  levelTransitionFx = {
-    label: level.label,
-    name: level.name,
-    started: performance.now(),
-    duration: 920,
-  };
+
+  transition = { from: previousTheme, to: level.theme, started: performance.now(), duration: 2500 };
+  levelTransitionFx = { label: level.label, name: level.name, started: performance.now(), duration: 2500 };
   screens.setTheme(level.theme);
   obstacles.reset();
   ghost.reset();
   cyberBoss.reset();
   audio.playLevel(currentLevelIndex, 0);
-  console.log('[game] transitioned to', level.name);
 }
 
 function applyDamage(reason) {
   if (player.isInvincible()) return;
-
+  audio.playHitSfx();
   cyberBoss?.notifyPlayerDamaged?.();
 
   if (lives > 0) {
@@ -492,11 +498,8 @@ function triggerGameOver(reason) {
   state = 'dead';
   audio.muffleDeath();
   spawnImpact(player.x + player.size / 2, player.y + player.size / 2, '#ff3355', 42);
-  
-  // FIX 3E: Camera shake only on death
-  const deathShake = CONFIG.camera.shakeOnDeath;
-  screenShake = Math.max(screenShake, deathShake.intensity);
-  
+  screenShake = Math.max(screenShake, CONFIG.camera.shakeOnDeath.intensity);
+
   screens.showGameOver({
     score,
     reason,
@@ -509,11 +512,7 @@ function triggerGameOver(reason) {
 function triggerLevelComplete() {
   if (state === 'complete') return;
   state = 'complete';
-  completeInfo = {
-    score: Math.floor(score),
-    song: audio.currentSongName(),
-    started: performance.now(),
-  };
+  completeInfo = { score: Math.floor(score), song: audio.currentSongName(), started: performance.now() };
   beatFlash = 1;
   screenShake = Math.max(screenShake, 6);
   audio.stop(false);
@@ -521,6 +520,9 @@ function triggerLevelComplete() {
 }
 
 function startGame({ fromCheckpoint = false, levelIndex = selectedLevel, clearCheckpoint = true } = {}) {
+  if (document.activeElement && typeof document.activeElement.blur === 'function') {
+    document.activeElement.blur();
+  }
   audio.unlock();
   screens.hideGameOver();
   screens.hideStart();
@@ -564,19 +566,14 @@ function startGame({ fromCheckpoint = false, levelIndex = selectedLevel, clearCh
   obstacles.reset();
   ghost.reset();
   cyberBoss.reset();
-  audio.playLevel(currentLevelIndex, 0);
-  console.log('[game] start', { fromCheckpoint, level: level.name, score, lives });
+  audio.playLevel(currentLevelIndex, fromCheckpoint ? (checkpoint?.audioTime || 0) : 0);
 }
 
 function pauseGame() {
   if (state !== 'playing') return;
   state = 'paused';
   audio.pause();
-  screens.showPause({
-    score,
-    song: audio.currentSongName(),
-    muted: audio.muted,
-  });
+  screens.showPause({ score, song: audio.currentSongName(), muted: audio.muted });
 }
 
 function resumeGame() {
@@ -591,219 +588,24 @@ function resumeGame() {
 function returnToMenu() {
   audio.stop();
   state = 'start';
-  screens.hidePause();
+  setStartPreviewLevel(currentLevelIndex);
   screens.hideGameOver();
-  clearProgressCheckpoint();
-  setStartPreviewLevel(selectedLevel);
-  screens.showStart(selectedLevel, assets.logo);
-}
-
-function restartSameLevel() {
-  const levelIndex = currentLevelIndex;
-  audio.stop();
-  screens.hidePause(() => startGame({ levelIndex, clearCheckpoint: false }));
-}
-
-function restartFromBeginning() {
-  audio.stop();
-  checkpoint = null;
-  shownCheckpoints = new Set();
-  clearProgressCheckpoint();
-  startGame({ levelIndex: 0, clearCheckpoint: true });
-}
-
-function continueFromCheckpoint() {
-  if (!checkpoint) return;
-  clearProgressCheckpoint();
-  startGame({ fromCheckpoint: true, clearCheckpoint: false });
-}
-
-function resumeFromProgressCheckpointDead() {
-  if (!progressCheckpoint.saved) return;
-  audio.unlock();
-  resumeFromProgressCheckpoint();
-}
-
-function drawLoadingFrame() {
-  if (!assets) return;
-  const level = getLevel(0);
-  assets.drawBackground(ctx, level, level.theme, bgScroll, 0.15, stars, shapes);
-  assets.drawGround(ctx, level.theme, bgScroll, 0.15);
-}
-
-function drawScene(withEntities) {
-  if (!assets || !screens || !player) return;
-  const level = getLevel(currentLevelIndex);
-  const theme = effectiveTheme(level);
-  const shake = state === 'playing' || state === 'complete' ? screenShake : 0;
-
-  ctx.clearRect(0, 0, CONFIG.W, CONFIG.H);
-  ctx.save();
-  if (shake > 0.05) {
-    ctx.translate((Math.random() * 2 - 1) * shake, (Math.random() * 2 - 1) * shake);
-  }
-
-  assets.drawBackground(ctx, level, theme, bgScroll, beatFlash, stars, shapes);
-  drawStageBack(ctx, stageArt, level, theme, bgScroll, beatFlash, frame);
-  assets.drawGround(ctx, theme, bgScroll, beatFlash);
-  drawStageFront(ctx, stageArt, level, theme, bgScroll, beatFlash, frame);
-
-  if (withEntities || state === 'dead' || state === 'paused' || state === 'complete') {
-    if (currentLevelIndex === 2) {
-      cyberBoss.draw(ctx, assets, theme, player.hitbox(), beatFlash, frame);
-    }
-    player.drawTrail(ctx, theme);
-    obstacles.draw(ctx, assets, theme, beatFlash, frame);
-    facebook.draw(ctx, theme, beatFlash);
-    
-    // FIX 3D: Add visual beat sync - player glow enhancement
-    if (beatFlash > 0.05) {
-      ctx.save();
-      ctx.shadowColor = theme.primary;
-      ctx.shadowBlur = Math.max(0, 10 + beatFlash * 10);
-      ctx.globalAlpha = 0.6 + beatFlash * 0.4;
-      assets.drawPlayer(ctx, player, theme, beatFlash, frame);
-      ctx.restore();
-    } else {
-      assets.drawPlayer(ctx, player, theme, beatFlash, frame);
-    }
-    
-    ghost.draw(ctx);
-    drawImpactParticles(ctx);
-  }
-
-  ctx.restore();
-
-  drawLevelTransitionOverlay(ctx, level, theme);
-  if (state === 'complete') drawCompleteOverlay(ctx, theme);
-
-  if (state === 'playing' || state === 'paused' || state === 'dead' || state === 'complete') {
-    hud.draw(ctx, {
-      score,
-      level,
-      theme,
-      lives,
-      checkpointActive: Boolean(checkpoint),
-      dangerDistance: facebook.distanceTo(player),
-      beatFlash,
-      songProgress: state === 'playing' || state === 'paused' || state === 'dead' || state === 'complete' ? audio.progress() : null,
-    });
-  }
-}
-
-function drawLevelTransitionOverlay(drawCtx, level, theme) {
-  if (!levelTransitionFx) return;
-
-  const elapsed = performance.now() - levelTransitionFx.started;
-  const t = elapsed / levelTransitionFx.duration;
-  if (t >= 1) {
-    levelTransitionFx = null;
-    return;
-  }
-
-  const wipe = easeOutCubic(clamp((t - 0.06) / 0.54, 0, 1));
-  const textIn = clamp((t - 0.16) / 0.22, 0, 1);
-  const textOut = clamp((0.86 - t) / 0.18, 0, 1);
-  const textAlpha = Math.min(textIn, textOut);
-  const flashAlpha = Math.max(0, 0.55 - t * 1.8);
-  const bandX = -CONFIG.W * 0.75 + wipe * CONFIG.W * 1.55;
-
-  drawCtx.save();
-  if (flashAlpha > 0) {
-    drawCtx.globalAlpha = flashAlpha;
-    drawCtx.fillStyle = '#ffffff';
-    drawCtx.fillRect(0, 0, CONFIG.W, CONFIG.H);
-  }
-
-  drawCtx.globalAlpha = 0.78;
-  drawCtx.fillStyle = `${theme.primary}cc`;
-  drawCtx.beginPath();
-  drawCtx.moveTo(bandX - 110, 0);
-  drawCtx.lineTo(bandX + 190, 0);
-  drawCtx.lineTo(bandX + 70, CONFIG.H);
-  drawCtx.lineTo(bandX - 230, CONFIG.H);
-  drawCtx.closePath();
-  drawCtx.fill();
-
-  drawCtx.globalAlpha = 0.42;
-  drawCtx.fillStyle = `${theme.accent}aa`;
-  drawCtx.fillRect(0, CONFIG.GROUND_Y - 6, CONFIG.W * wipe, 10);
-
-  if (textAlpha > 0.02) {
-    drawCtx.globalAlpha = textAlpha;
-    drawCtx.textAlign = 'center';
-    drawCtx.fillStyle = '#ffffff';
-    drawCtx.font = '42px Pusab, Impact, Arial Black, sans-serif';
-    drawCtx.shadowColor = theme.primary;
-    drawCtx.shadowBlur = CONFIG.performance.lowFx ? 6 : 18;
-    drawCtx.fillText(levelTransitionFx.label, CONFIG.W / 2, 184);
-    drawCtx.font = '24px Pusab, Impact, Arial Black, sans-serif';
-    drawCtx.fillStyle = theme.accent;
-    drawCtx.fillText(levelTransitionFx.name, CONFIG.W / 2, 220);
-  }
-  drawCtx.restore();
-}
-
-function drawCompleteOverlay(drawCtx, theme) {
-  const age = completeInfo ? (performance.now() - completeInfo.started) / 1000 : 0;
-  const alpha = clamp(age / 0.35, 0, 1);
-
-  drawCtx.save();
-  drawCtx.globalAlpha = alpha;
-  drawCtx.fillStyle = 'rgba(0,0,0,0.48)';
-  drawCtx.fillRect(0, 0, CONFIG.W, CONFIG.H);
-
-  drawCtx.textAlign = 'center';
-  drawCtx.textBaseline = 'middle';
-  drawCtx.shadowColor = '#78ff38';
-  drawCtx.shadowBlur = CONFIG.performance.lowFx ? 8 : 24;
-  drawCtx.fillStyle = '#8dff3d';
-  drawCtx.font = '46px Pusab, Impact, Arial Black, sans-serif';
-  drawCtx.fillText('LEVEL COMPLETE!', CONFIG.W / 2, 158);
-
-  drawCtx.shadowColor = theme.primary;
-  drawCtx.shadowBlur = CONFIG.performance.lowFx ? 5 : 14;
-  drawCtx.fillStyle = '#ffffff';
-  drawCtx.font = '20px Pusab, Impact, Arial Black, sans-serif';
-  drawCtx.fillText(`SCORE ${completeInfo?.score ?? Math.floor(score)}`, CONFIG.W / 2, 214);
-  drawCtx.font = '15px Pusab, Impact, Arial Black, sans-serif';
-  drawCtx.fillText('ENTER / TAP UNTUK MENU', CONFIG.W / 2, 258);
-
-  drawCtx.fillStyle = '#78ff38';
-  for (let i = 0; i < 3; i++) {
-    drawCtx.beginPath();
-    drawCtx.arc(CONFIG.W / 2 - 58 + i * 58, 306, 18 + Math.sin(age * 5 + i) * 2, 0, Math.PI * 2);
-    drawCtx.fill();
-  }
-  drawCtx.restore();
-}
-
-function easeOutCubic(t) {
-  return 1 - Math.pow(1 - t, 3);
-}
-
-function effectiveTheme(level) {
-  if (!transition) return level.theme;
-  const t = (performance.now() - transition.started) / transition.duration;
-  if (t >= 1) {
-    transition = null;
-    return level.theme;
-  }
-  return blendThemes(transition.from, transition.to, t);
+  screens.hidePause(() => {
+    screens.showStart(selectedLevel, assets.logo);
+  });
+  bgScroll = 0;
 }
 
 function spawnImpact(x, y, color, count) {
   for (let i = 0; i < count; i++) {
     const angle = Math.random() * Math.PI * 2;
-    const speed = 1.4 + Math.random() * 5.2;
+    const speed = 2 + Math.random() * 5;
     impactParticles.push({
-      x,
-      y,
+      x, y,
       vx: Math.cos(angle) * speed,
       vy: Math.sin(angle) * speed,
-      r: 2 + Math.random() * 6,
+      life: 1.0,
       color,
-      life: 1,
     });
   }
 }
@@ -812,156 +614,351 @@ function updateImpactParticles(dt) {
   for (const p of impactParticles) {
     p.x += p.vx * dt;
     p.y += p.vy * dt;
-    p.vy += 0.14 * dt;
-    p.life -= 0.025 * dt;
+    p.life -= 0.03 * dt;
   }
   impactParticles = impactParticles.filter((p) => p.life > 0);
 }
 
-function drawImpactParticles(drawCtx) {
-  const blur = getPerfConfig().shadowBlur ? 14 : 0;
-  for (const p of impactParticles) {
-    drawCtx.save();
-    drawCtx.globalAlpha = Math.max(0, p.life);
-    drawCtx.fillStyle = p.color;
-    drawCtx.shadowColor = p.color;
-    drawCtx.shadowBlur = blur;
-    drawCtx.beginPath();
-    drawCtx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-    drawCtx.fill();
-    drawCtx.restore();
-  }
+function easeInOutCubic(t) {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 }
 
-function bindUI() {
-  document.getElementById('startButton').addEventListener('click', () => {
-    startGame({ levelIndex: selectedLevel, clearCheckpoint: true });
-  });
+function drawScene(drawHud) {
+  let theme = getLevel(currentLevelIndex).theme;
+  let transitionFlash = 0;
+  if (transition) {
+    const elapsed = performance.now() - transition.started;
+    const rawP = Math.min(1, elapsed / transition.duration);
+    const p = easeInOutCubic(rawP);
+    theme = blendThemes(transition.from, transition.to, p);
+    // Flash overlay puncak di tengah transisi lalu memudar
+    transitionFlash = Math.sin(rawP * Math.PI) * 0.18;
+    if (rawP >= 1) transition = null;
+  }
 
-  for (const button of document.querySelectorAll('.level-choice')) {
-    button.addEventListener('click', () => {
-      setStartPreviewLevel(Number(button.dataset.level));
-      screens.updateLevelButtons(selectedLevel);
+  ctx.clearRect(0, 0, CONFIG.W, CONFIG.H);
+
+  let shakeX = 0, shakeY = 0;
+  if (screenShake > 0.1) {
+    shakeX = (Math.random() - 0.5) * screenShake * 2;
+    shakeY = (Math.random() - 0.5) * screenShake * 2;
+  }
+  ctx.save();
+  ctx.translate(shakeX, shakeY);
+
+  drawStageBack(ctx, stageArt, getLevel(currentLevelIndex), theme, bgScroll, beatFlash, frame);
+  VisualEffects.drawGrid(ctx, theme, bgScroll, beatFlash, getLevel(currentLevelIndex).name);
+  if (activeStars()) drawStars(theme);
+  if (activeShapes()) drawShapes(theme);
+
+  if (state !== 'start') {
+    obstacles.draw(ctx, theme, beatFlash, assets);
+    if (activeBoss()) cyberBoss.draw(ctx, assets, theme, player.hitbox(), beatFlash, frame);
+    player.drawTrail(ctx, theme);
+    assets.drawPlayer(ctx, player, theme, beatFlash);
+    if (CONFIG.gameplay.facebookChaserEnabled) facebook.draw(ctx, theme, beatFlash, assets);
+  }
+
+  VisualEffects.drawGroundGlow(ctx, theme, beatFlash);
+  drawStageFront(ctx, stageArt, getLevel(currentLevelIndex), theme, bgScroll, beatFlash, frame);
+
+  if (state !== 'start') {
+    ghost.draw(ctx, theme, player);
+  }
+
+  ctx.globalAlpha = 1;
+  for (const p of impactParticles) {
+    ctx.fillStyle = p.color;
+    ctx.globalAlpha = Math.max(0, p.life);
+    ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
+  }
+  ctx.globalAlpha = 1;
+
+  // Smooth transition flash overlay — warna memudar halus antar level
+  if (transitionFlash > 0.01) {
+    ctx.save();
+    ctx.globalAlpha = transitionFlash;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, CONFIG.W, CONFIG.H);
+    ctx.restore();
+  }
+
+  if (drawHud) {
+    const dangerDist = CONFIG.gameplay.facebookChaserEnabled ? (player.x - facebook.x) : 1000;
+    hud.draw(ctx, {
+      score,
+      level: getLevel(currentLevelIndex),
+      theme,
+      lives,
+      checkpointActive: progressCheckpoint.saved,
+      dangerDistance: dangerDist,
+      beatFlash,
+      songProgress: audio.progress()
     });
   }
 
-  document.getElementById('resumeButton').addEventListener('click', resumeGame);
-  document.getElementById('pauseRestartButton').addEventListener('click', restartSameLevel);
-  document.getElementById('menuButton').addEventListener('click', returnToMenu);
-  document.getElementById('muteButton').addEventListener('click', () => {
-    const muted = audio.toggleMuted();
-    screens.showPause({ score, song: audio.currentSongName(), muted });
-  });
-  document.getElementById('restartButton').addEventListener('click', restartFromBeginning);
-  document.getElementById('continueCheckpointButton').addEventListener('click', () => {
-    if (progressCheckpoint.saved) resumeFromProgressCheckpointDead();
-    else continueFromCheckpoint();
-  });
-
-  window.addEventListener('keydown', onKeyDown);
-  window.addEventListener('keyup', onKeyUp);
-  canvas.addEventListener('pointerdown', onPointerDown);
-  window.addEventListener('pointerup', () => {
-    isJumpHeld = false;
-  });
-  canvas.addEventListener('touchstart', (event) => event.preventDefault(), { passive: false });
-  canvas.addEventListener('touchend', (event) => event.preventDefault(), { passive: false });
-}
-
-function onKeyDown(event) {
-  const jumpKey = event.code === 'Space' || event.code === 'ArrowUp' || event.code === 'KeyW';
-  if (jumpKey) {
-    event.preventDefault();
-    isJumpHeld = true;
-    audio.unlock();
-    if (state === 'playing') player.jump();
-    else if (state === 'start') startGame({ levelIndex: selectedLevel, clearCheckpoint: true });
-    return;
-  }
-
-  if (event.code === 'Escape' || event.code === 'KeyP') {
-    event.preventDefault();
-    if (state === 'playing') pauseGame();
-    else if (state === 'paused') resumeGame();
-  }
-
-  if (event.code === 'Enter') {
-    event.preventDefault();
-    if (state === 'dead') {
-      if (progressCheckpoint.saved) resumeFromProgressCheckpointDead();
-      else startGame({ fromCheckpoint: Boolean(checkpoint), clearCheckpoint: false });
+  if (levelTransitionFx) {
+    const elapsed = performance.now() - levelTransitionFx.started;
+    const p = elapsed / levelTransitionFx.duration;
+    if (p < 1) {
+      const yOff = p < 0.2 ? -50 * (1 - p / 0.2) : p > 0.8 ? 50 * ((p - 0.8) / 0.2) : 0;
+      const alpha = p < 0.2 ? p / 0.2 : p > 0.8 ? 1 - (p - 0.8) / 0.2 : 1;
+      ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+      ctx.font = 'bold 48px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText(levelTransitionFx.label, CONFIG.W / 2, CONFIG.H / 2 - 20 + yOff);
+      ctx.font = 'bold 24px Arial';
+      ctx.fillStyle = theme.primary;
+      ctx.globalAlpha = alpha;
+      ctx.fillText(levelTransitionFx.name, CONFIG.W / 2, CONFIG.H / 2 + 20 + yOff);
+      ctx.globalAlpha = 1;
+    } else {
+      levelTransitionFx = null;
     }
-    else if (state === 'complete') returnToMenu();
-    else if (state === 'start') startGame({ levelIndex: selectedLevel, clearCheckpoint: true });
   }
+
+  if (state === 'complete' && completeInfo) {
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, CONFIG.W, CONFIG.H);
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 54px Arial';
+    ctx.fillText('LEVEL CLEARED', CONFIG.W / 2, CONFIG.H / 2 - 40);
+    ctx.font = 'bold 24px Arial';
+    ctx.fillStyle = theme.primary;
+    ctx.fillText(`Score: ${completeInfo.score}`, CONFIG.W / 2, CONFIG.H / 2 + 20);
+    ctx.fillStyle = '#aaa';
+    ctx.font = '16px Arial';
+    ctx.fillText('Press SPACE/ENTER to continue', CONFIG.W / 2, CONFIG.H / 2 + 70);
+  }
+
+  ctx.restore();
 }
 
-function onKeyUp(event) {
-  const jumpKey = event.code === 'Space' || event.code === 'ArrowUp' || event.code === 'KeyW';
-  if (jumpKey) {
-    event.preventDefault();
-    isJumpHeld = false;
-  }
+function drawLoadingFrame() {
+  ctx.fillStyle = '#02040a';
+  ctx.fillRect(0, 0, CONFIG.W, CONFIG.H);
+  ctx.save();
+  ctx.globalAlpha = 0.1;
+  VisualEffects.drawGrid(ctx, { line: '#00d4ff' }, bgScroll, 0, 'LOADING');
+  ctx.restore();
 }
 
-function onPointerDown(event) {
-  event.preventDefault();
-  isJumpHeld = true;
-  audio.unlock();
-  const pos = canvasPoint(event);
-  if (state === 'playing') {
-    if (hud.hitPauseButton(pos.x, pos.y)) pauseGame();
-    else player.jump();
-  }
-  else if (state === 'start') startGame({ levelIndex: selectedLevel, clearCheckpoint: true });
-  else if (state === 'dead') {
-    if (progressCheckpoint.saved) resumeFromProgressCheckpointDead();
-    else startGame({ fromCheckpoint: Boolean(checkpoint), clearCheckpoint: false });
-  }
-  else if (state === 'complete') returnToMenu();
+function activeStars() {
+  const perf = getPerfConfig();
+  return perf.stars > 0 && state !== 'start' && getLevel(currentLevelIndex).name !== 'BOSS';
 }
 
-function setStartPreviewLevel(levelIndex) {
-  selectedLevel = clamp(levelIndex, 0, CONFIG.levels.length - 1);
-  if (state !== 'start' && state !== 'loading') return;
-
-  currentLevelIndex = selectedLevel;
-  const level = getLevel(currentLevelIndex);
-  score = 0;
-  gameSpeed = level.speed;
-  obInterval = level.obInterval;
-  screens.setTheme(level.theme);
+function activeShapes() {
+  const perf = getPerfConfig();
+  return perf.shapes > 0 && state !== 'start';
 }
 
-function canvasPoint(event) {
-  const rect = canvas.getBoundingClientRect();
-  return {
-    x: ((event.clientX - rect.left) / rect.width) * CONFIG.W,
-    y: ((event.clientY - rect.top) / rect.height) * CONFIG.H,
-  };
+function activeBoss() {
+  return state !== 'start' && getLevel(currentLevelIndex).name === 'BOSS';
+}
+
+function drawStars(theme) {
+  if (!stars) return;
+  const count = Math.min(getPerfConfig().stars, stars.length);
+  ctx.fillStyle = theme.accent;
+  for (let i = 0; i < count; i++) {
+    const s = stars[i];
+    s.x -= s.speed * (gameSpeed * 0.4);
+    if (s.x < 0) {
+      s.x = CONFIG.W;
+      s.y = Math.random() * (CONFIG.H * 0.6);
+    }
+    const alpha = 0.3 + Math.sin(frame * 0.05 + s.id) * 0.2;
+    ctx.globalAlpha = alpha;
+    ctx.fillRect(s.x, s.y, s.size, s.size);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawShapes(theme) {
+  if (!shapes) return;
+  const count = Math.min(getPerfConfig().shapes, shapes.length);
+  ctx.strokeStyle = theme.primary;
+  ctx.lineWidth = 1.5;
+  for (let i = 0; i < count; i++) {
+    const sh = shapes[i];
+    sh.x -= sh.speed * (gameSpeed * 0.5);
+    sh.rot += sh.rs;
+    if (sh.x < -50) {
+      sh.x = CONFIG.W + 50;
+      sh.y = Math.random() * CONFIG.H;
+    }
+    ctx.save();
+    ctx.globalAlpha = 0.15;
+    ctx.translate(sh.x, sh.y);
+    ctx.rotate(sh.rot);
+    ctx.beginPath();
+    for (let j = 0; j < sh.sides; j++) {
+      const a = (j / sh.sides) * Math.PI * 2;
+      const r = sh.size;
+      if (j === 0) ctx.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+      else ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+    }
+    ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
+  }
+  ctx.globalAlpha = 1;
 }
 
 function resizeCanvas() {
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
-  syncCanvasLayout(canvas);
-
-  canvas.style.width = '100vw';
-  canvas.style.height = '100vh';
-  canvas.style.position = '';
-  canvas.style.left = '';
-  canvas.style.top = '';
-
   const wrap = document.getElementById('gameWrap');
-  if (wrap) {
-    wrap.style.width = '100vw';
-    wrap.style.height = '100vh';
+  if (!wrap) return;
+  const winW = window.innerWidth;
+  const winH = window.innerHeight;
+  const aspect = 16 / 9;
+  let targetW = winW;
+  let targetH = winW / aspect;
+  if (targetH > winH) {
+    targetH = winH;
+    targetW = winH * aspect;
+  }
+  canvas.width = 800;
+  canvas.height = 450;
+  canvas.style.width = `${targetW}px`;
+  canvas.style.height = `${targetH}px`;
+  
+  // Center it visually
+  canvas.style.position = 'absolute';
+  canvas.style.left = '50%';
+  canvas.style.top = '50%';
+  canvas.style.transform = 'translate(-50%, -50%)';
+
+  syncCanvasLayout(canvas);
+}
+
+function setStartPreviewLevel(idx) {
+  selectedLevel = clamp(idx, 0, CONFIG.levels.length - 1);
+  screens.updateLevelButtons(selectedLevel);
+  const lv = getLevel(selectedLevel);
+  screens.setTheme(lv.theme);
+  gameSpeed = lv.speed;
+}
+
+function bindUI() {
+  document.getElementById('startButton')?.addEventListener('click', () => {
+    audio.unlock();
+    startGame({ levelIndex: selectedLevel, clearCheckpoint: true });
+  });
+
+  const levelBtns = document.querySelectorAll('.level-choice');
+  levelBtns.forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      const lvl = Number(e.target.dataset.level);
+      setStartPreviewLevel(lvl);
+    });
+  });
+
+  document.getElementById('resumeButton')?.addEventListener('click', resumeGame);
+  document.getElementById('pauseRestartButton')?.addEventListener('click', () => {
+    resumeGame();
+    startGame({ levelIndex: currentLevelIndex, clearCheckpoint: true });
+  });
+  document.getElementById('menuButton')?.addEventListener('click', returnToMenu);
+  document.getElementById('muteButton')?.addEventListener('click', () => {
+    const isMuted = audio.toggleMuted();
+    screens.showPause({ score, song: audio.currentSongName(), muted: isMuted });
+  });
+
+  document.getElementById('continueCheckpointButton')?.addEventListener('click', () => {
+    if (progressCheckpoint.saved) {
+      resumeFromProgressCheckpoint();
+    } else if (checkpoint) {
+      startGame({ fromCheckpoint: true });
+    }
+  });
+
+  document.getElementById('restartButton')?.addEventListener('click', () => {
+    startGame({ levelIndex: currentLevelIndex, clearCheckpoint: true });
+  });
+
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'Space' || e.code === 'ArrowUp') {
+      if (state === 'start' && e.code === 'Space') {
+        startGame({ levelIndex: selectedLevel, clearCheckpoint: true });
+        return;
+      }
+      isJumpHeld = true;
+      jumpBufferTimer = 150;
+      e.preventDefault();
+    } else if (e.code === 'Escape') {
+      if (state === 'playing') pauseGame();
+      else if (state === 'paused') resumeGame();
+    } else if (e.code === 'Enter') {
+      if (state === 'start') {
+        startGame({ levelIndex: selectedLevel, clearCheckpoint: true });
+      } else if (state === 'dead' && (checkpoint || progressCheckpoint.saved)) {
+        if (progressCheckpoint.saved) resumeFromProgressCheckpoint();
+        else startGame({ fromCheckpoint: true });
+      } else if (state === 'dead') {
+        startGame({ levelIndex: currentLevelIndex, clearCheckpoint: true });
+      } else if (state === 'complete') {
+        returnToMenu();
+      }
+    }
+  });
+
+  window.addEventListener('keyup', (e) => {
+    if (e.code === 'Space' || e.code === 'ArrowUp') {
+      isJumpHeld = false;
+      e.preventDefault();
+    }
+  });
+
+  function handlePointerDown(e, clientX, clientY) {
+    if (state === 'playing') {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      const x = (clientX - rect.left) * scaleX;
+      const y = (clientY - rect.top) * scaleY;
+      
+      if (hud.hitPauseButton(x, y)) {
+        pauseGame();
+        return;
+      }
+    }
+    
+    if (state === 'start') {
+      startGame({ levelIndex: selectedLevel, clearCheckpoint: true });
+      return;
+    }
+    if (state === 'complete') {
+      returnToMenu();
+      return;
+    }
+    isJumpHeld = true;
+    jumpBufferTimer = 150;
+    if (e.cancelable) e.preventDefault();
   }
 
-  if (assets) {
-    stars = createStars();
-    shapes = createShapes();
-    stageArt = createStageArt();
-  }
-  hud?.repositionPauseButton?.();
+  canvas.addEventListener('touchstart', (e) => {
+    handlePointerDown(e, e.touches[0].clientX, e.touches[0].clientY);
+  }, { passive: false });
+
+  canvas.addEventListener('touchend', (e) => {
+    isJumpHeld = false;
+    if (e.cancelable) e.preventDefault();
+  }, { passive: false });
+
+  canvas.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    handlePointerDown(e, e.clientX, e.clientY);
+  });
+
+  canvas.addEventListener('mouseup', (e) => {
+    if (e.button === 0) isJumpHeld = false;
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && state === 'playing') {
+      pauseGame();
+    }
+  });
 }

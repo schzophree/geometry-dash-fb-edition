@@ -107,16 +107,22 @@ export class CyberDemonBoss {
     }
 
     if (event.type === 'PILLAR_SPAWN') {
-      this.activeAttacks.push({
-        type: 'pillar',
-        position: event.position,
-        x: CONFIG.W + 54,
-        y: event.position === 'top' ? 0 : CONFIG.GROUND_Y - 118,
-        w: 54,
-        h: event.position === 'top' ? 178 : 118,
-        life: 8,
-        age: 0,
-      });
+      const spawnPillar = (pos) => {
+        this.activeAttacks.push({
+          type: 'pillar',
+          position: pos,
+          x: CONFIG.W + 54,
+          y: pos === 'top' ? 0 : CONFIG.GROUND_Y - 118,
+          w: 54,
+          h: pos === 'top' ? 178 : 118,
+          life: 8,
+          age: 0,
+        });
+      };
+      spawnPillar(event.position);
+      if (event.mirror) {
+        spawnPillar(event.position === 'top' ? 'bottom' : 'top');
+      }
       return;
     }
 
@@ -132,6 +138,18 @@ export class CyberDemonBoss {
           life: 7,
           age: 0,
         });
+        if (event.mirror) {
+          this.activeAttacks.push({
+            type: 'spike',
+            x: CONFIG.W + 60 + i * 34,
+            y: 0,
+            w: 30,
+            h: 38,
+            life: 7,
+            age: 0,
+            inverted: true
+          });
+        }
       }
       return;
     }
@@ -148,6 +166,17 @@ export class CyberDemonBoss {
           life: 7,
           age: 0,
         });
+        if (event.mirror) {
+          this.activeAttacks.push({
+            type: 'block',
+            x: CONFIG.W + 62,
+            y: i * 36,
+            w: 38,
+            h: 36,
+            life: 7,
+            age: 0,
+          });
+        }
       }
       return;
     }
@@ -623,9 +652,15 @@ export class CyberDemonBoss {
     ctx.shadowColor = theme.obC;
     ctx.shadowBlur = CONFIG.performance.lowFx ? 4 : 12;
     ctx.beginPath();
-    ctx.moveTo(attack.x + attack.w / 2, attack.y);
-    ctx.lineTo(attack.x + attack.w, attack.y + attack.h);
-    ctx.lineTo(attack.x, attack.y + attack.h);
+    if (attack.inverted) {
+      ctx.moveTo(attack.x + attack.w / 2, attack.y + attack.h);
+      ctx.lineTo(attack.x + attack.w, attack.y);
+      ctx.lineTo(attack.x, attack.y);
+    } else {
+      ctx.moveTo(attack.x + attack.w / 2, attack.y);
+      ctx.lineTo(attack.x + attack.w, attack.y + attack.h);
+      ctx.lineTo(attack.x, attack.y + attack.h);
+    }
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
@@ -696,8 +731,9 @@ export class CyberDemonBoss {
   }
 
   spawnAutoHazards(audioTime) {
-    if (audioTime < 181) return;
-    const beat = Math.floor((audioTime - 181) / 2.4);
+    const mappingEnd = 27.6;
+    if (audioTime < mappingEnd) return;
+    const beat = Math.floor((audioTime - mappingEnd) / 2.2);
     if (beat === this.lastAutoHazardBeat) return;
     this.lastAutoHazardBeat = beat;
 

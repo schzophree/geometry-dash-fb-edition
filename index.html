@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Geometry Dash: Fesnuk Edition</title>
+  <link rel="icon" type="image/png" href="assets/ui/loading_logo.png">
   <link rel="stylesheet" href="style.css" />
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -26,23 +27,31 @@
   <main id="gameWrap" class="game-wrap" aria-label="Geometry Dash Fesnuk Edition">
     <canvas id="gameCanvas" width="800" height="450" aria-label="Geometry Dash Fesnuk game canvas"></canvas>
 
-    <section id="loadingOverlay" class="screen loading-screen is-visible" aria-live="polite">
-      <div class="loading-card">
-        <div class="loading-title">GEOMETRY DASH: FESNUK EDITION</div>
-        <div class="loading-track"><span id="loadingFill"></span></div>
-        <div id="loadingText" class="loading-text">Loading assets 0%</div>
+    <!-- GD-Style Loading Screen -->
+    <div id="loader" class="gd-loader">
+      <img class="loader-logo" src="assets/ui/loading_logo.png" alt="Geometry Dash Logo"
+           onerror="this.style.display='none'">
+      <img class="loader-subtitle" src="assets/ui/fesnuk_edition.png" alt="Fesnuk Edition"
+           style="width: min(350px, 70vw); margin: -10px auto 30px; display: block;"
+           onerror="this.style.display='none'">
+      <div class="loader-spinner"></div>
+      <div class="loader-progress">
+        <div class="css-loader-bar">
+          <div id="loadingFill" class="css-loader-fill"></div>
+        </div>
+        <div id="loadingText" class="loader-status">MEMUAT DISTRAKSI... 0%</div>
       </div>
-    </section>
+    </div>
 
     <section id="startOverlay" class="screen start-screen" aria-label="Menu utama">
       <div class="screen-shade"></div>
       <div class="start-content">
         <img id="logoImage" class="logo-image" alt="Geometry Dash Fesnuk logo" hidden />
         <h1 id="logoText" class="game-logo">DIKEJAR FACEBOOK</h1>
-        <p class="game-subtitle">Geometry Dash Edition</p>
+        <img class="game-subtitle-img" src="assets/ui/fesnuk_edition.png" alt="Fesnuk Edition" style="width: min(300px, 60vw); margin: -5px auto 20px; display: block;" onerror="this.style.display='none'">
 
         <div class="difficulty-stars" aria-hidden="true">
-          <span>*</span><span>*</span><span>*</span>
+          <span>★</span><span>★</span><span>★</span>
         </div>
 
         <div id="levelButtons" class="level-buttons" aria-label="Pilih tingkat awal">
@@ -58,7 +67,6 @@
 
         <p class="start-blink">SPASI / TAP UNTUK MAIN</p>
         <p class="start-hint">TAHAN untuk lompat terus · ENTER = mulai</p>
-        <div class="fb-start-icon" aria-hidden="true">f</div>
       </div>
     </section>
 
@@ -78,7 +86,7 @@
     <section id="deadOverlay" class="screen dead-screen" aria-label="Game over">
       <div class="dead-card">
         <h2>GAME OVER</h2>
-        <p id="deadReason">Facebook berhasil nyentuh cube.</p>
+        <div id="deadReason" class="dead-reason-box"></div>
         <p id="deadScore">Score: 0</p>
         <button id="continueCheckpointButton" type="button" class="dead-action checkpoint">▶ LANJUT DARI CHECKPOINT</button>
         <button id="restartButton" type="button" class="dead-action">↻ MULAI DARI AWAL</button>

@@ -61,6 +61,8 @@ export class AudioEngine {
     console.log('[audio] context ensured');
     console.log('[audio] lazy loading enabled; music decodes when a level starts');
     await this.preloadSfx();
+    // Preload hit SFX
+    await this.loadSfx('hit', CONFIG.audio.hitSfx);
     console.log('[audio] sfx preloaded');
     onProgress(1);
   }
@@ -91,8 +93,12 @@ export class AudioEngine {
   audioCandidates(file) {
     const set = new Set();
     if (file) set.add(file);
+    // Fallback paths
     if (file?.startsWith('music/')) {
       set.add(`assets/audio/bgm/${file.split('/').pop()}`);
+    }
+    if (file?.startsWith('assets/audio/bgm/')) {
+      set.add(`music/${file.split('/').pop()}`);
     }
     if (file?.startsWith('assets/audio/')) {
       set.add(`music/${file.split('/').pop()}`);
@@ -129,6 +135,16 @@ export class AudioEngine {
     if (ctx?.state === 'suspended') {
       await ctx.resume().catch(() => {});
     }
+  }
+
+  /** Play jump SFX (Disabled) */
+  playJumpSfx() {
+    // Disabled as requested
+  }
+
+  /** Play hit/damage SFX */
+  playHitSfx() {
+    this.playSfx('hit', { gain: 0.7 });
   }
 
   playLevel(levelIndex, offset = 0) {

@@ -292,23 +292,8 @@ function drawPortal(ctx, x, y, r, tone, theme, beatFlash, frame) {
 function drawCaveSilhouette(ctx, teeth, level, theme, scroll, beatFlash) {
   if (level.index < 1) return;
   ctx.save();
-  ctx.fillStyle = '#020202';
   ctx.shadowColor = level.index >= 2 ? '#ff1f1f' : theme.accent;
   ctx.shadowBlur = CONFIG.performance.lowFx ? 0 : 22;
-
-  const topBase = 18 + level.index * 9;
-  ctx.beginPath();
-  ctx.moveTo(0, 0);
-  ctx.lineTo(CONFIG.W, 0);
-  for (let i = teeth.length - 1; i >= 0; i--) {
-    const tooth = teeth[i];
-    const x = wrap(tooth.x - scroll * 0.28, CONFIG.W + 70) - 35;
-    const y = topBase + tooth.h + (i % 2) * 12;
-    ctx.lineTo(x, y);
-  }
-  ctx.lineTo(0, topBase + 58);
-  ctx.closePath();
-  ctx.fill();
 
   if (level.index >= 2) {
     ctx.globalAlpha = 0.72 + beatFlash * 0.2;

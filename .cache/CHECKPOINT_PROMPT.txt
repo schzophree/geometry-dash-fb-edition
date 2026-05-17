@@ -1,0 +1,227 @@
+════════════════════════════════════════════════════════════════════════════
+PROJECT: "DIKEJAR FACEBOOK — Geometry Dash Edition"
+════════════════════════════════════════════════════════════════════════════
+
+CHECKPOINT MERGED REQUIREMENTS & ARCHITECTURE
+Lokasi: d:\mngodof\geometridash
+
+Ringkasan:
+- HTML5 Canvas-based rhythm platformer (800×450px, scaled responsive).
+- Player cube auto-runs, must jump to avoid obstacles.
+- Facebook icon chases from left; ghost Facebook status posts taunt.
+- Web Audio API synthesizes full EDM music (no external audio files).
+- MODULAR architecture (separate JS files for each system).
+- BGM files already downloaded: assets/audio/bgm/ (level1.mp3, level2.mp3, boss.mp3).
+
+════════════════════════════════════════════════════════════════════════════
+MODULAR FILE STRUCTURE (as built)
+════════════════════════════════════════════════════════════════════════════
+
+Core:
+  - index.html (main entry, loads all scripts)
+  - js/config.js (centralized CONFIG object with all tweakables)
+  - js/main.js (game loop, state machine, integration)
+
+Systems:
+  - js/audio.js (Web Audio API synthesis + BGM playback)
+  - js/particles.js (particle burst effects on hits)
+  - js/background-animator.js (animated scanlines, floating elements)
+  - js/visual-effects.js (vignette, danger flash, screen glitch, shake)
+  - js/menu-animations.js (idle menu animations, button glow)
+  - js/renderer.js (background, grid, clouds, static visuals)
+  
+Game Logic:
+  - js/player.js (physics, jumping, collision box)
+  - js/facebook.js (chaser AI, catch detection)
+  - js/obstacle.js (spawn patterns, collision)
+  - js/hud.js (score, level, danger indicator)
+  - js/memeOverlay.js (ghost FB posts, random messages)
+
+Assets:
+  - assets/audio/bgm/ (level1.mp3, level2.mp3, boss.mp3)
+  - assets/images/boss/ (folder for boss overlay screenshots)
+  - assets/fonts/ (game fonts)
+  - assets/images/ (player, enemy, obstacles, backgrounds)
+
+════════════════════════════════════════════════════════════════════════════
+UNIFIED GAME SPEC (merged from requirements)
+════════════════════════════════════════════════════════════════════════════
+
+LEVELS (4 total, with full color schemes):
+
+Level 1 "STEREO MADNESS" [score 0–899]
+  Colors: bg #040d28→#091640, primary #00d4ff, accent #0088ff
+  Ground: #0d2045→#07112a, line #00d4ff
+  Speed: 5.5px/frame, BPM: 140, interval: 90 frames, minInterval: 54
+  Obstacles: #00ccff / #0055cc, Facebook: #4267B2
+
+Level 2 "BACK ON TRACK" [score 900–2099]
+  Colors: bg #180900→#2a1200, primary #ffaa00, accent #ff6600
+  Ground: #361400→#1c0900, line #ffaa00
+  Speed: 6.5, BPM: 145, interval: 75, minInterval: 44
+  Obstacles: #ffaa00 / #ff4400, Facebook: #cc3300
+
+Level 3 "POLARGEIST" [score 2100–3799]
+  Colors: bg #0d0018→#190030, primary #cc44ff, accent #ff44cc
+  Ground: #260040→#160020, line #cc44ff
+  Speed: 7.8, BPM: 152, interval: 62, minInterval: 36
+  Obstacles: #cc44ff / #8800ee, Facebook: #8800cc
+
+Level 4 "DRY OUT" [score 3800+]
+  Colors: bg #180000→#2a0000, primary #ff2244, accent #ff6644
+  Ground: #380000→#1c0000, line #ff2244
+  Speed: 9.2, BPM: 158, interval: 50, minInterval: 28
+  Obstacles: #ff2244 / #ff5500, Facebook: #cc0000
+
+PLAYER (36×36px):
+  Position: fixed X=140px, Y snaps to ground (GROUND_Y = H - 66)
+  Physics:
+    - Gravity: +0.74 per frame
+    - Jump: vy = -14.0 (on ground or coyote > 5 frames)
+    - Rotation: in air += 0.10/frame; on ground lerp to 90° snap
+  Visual:
+    - Outer square (level primary color)
+    - Inner dark square (rgba 0,0,0, 0.38) inset 5px
+    - Center circle (accent color), radius = w×0.17 + beatFlash×2.5
+    - 4 corner dots (white 0.6 alpha), radius 2.4px
+    - Glow: shadowBlur = 18 + beatFlash×16
+  Trail: rotated squares, life 1.0 → 0, decay 0.075/frame, alpha=life×0.42
+
+FACEBOOK CHASER (46×46px):
+  Position: x = -72 (starts off-left)
+  Speed: level.speed × 0.62 + score × 0.0013
+  Target: player.x - 95
+  Wobble: sinusoidal ±5px at 0.14 rad/frame
+  Visual:
+    - Filled circle (level fbColor)
+    - White bold "f" centered
+    - ANGRY if dist < 170: body red, two red dots (eyes), eyebrows
+  Catch: fb.x + 46 > player.x + 8 → game over
+
+OBSTACLES (pattern-based spawn):
+  Types: spike, block, tall, step, double-spike
+  Level pools:
+    Level 0 (easy): [sp], [sp,sp], [bl], [bl,sp], [sp,bl]
+    Level 1 (medium): + [sp,sp,sp], [tl], [bl,bl], [st], [sp,tl], [tl,sp]
+    Level 2 (hard): + [sp×4], [tl,tl], [st,sp], [sp,tl,sp], [double-sp]
+    Level 3 (insane): + [tl,tl,sp], [sp,sp,sp,tl], [ds,tl], [st,tl,sp]
+  Visual: canvas-drawn, glow blur = 11 + beatFlash×9
+
+GHOST FEATURE (Facebook Status Post):
+  Spawn interval: 300–700 frames (random)
+  Fade speed: 0.018/frame, maxAlpha: 0.82, hold: 160 frames
+  Bob: amplitude 6px, speed 0.025 rad/frame
+  Card: 300×130px, rounded 12px, bg rgba(230,236,255, 0.12)
+  Messages (random pick):
+    - "ngapain ngoding, / mending scroll fesnuk 😂"
+    - "deadline besok? / ya scroll aja dulu 😌"
+    - "bug belum kelar? / fesnuk dulu 5 menit 🙃"
+    - "ngoding dari tadi, / istirahat fesnuk yuk 😴"
+    - "error mulu, / udah buka fesnuk aja bro 💀"
+
+WEB AUDIO API ENGINE:
+  BPM per level: 140, 145, 152, 158
+  Schedule look-ahead: ~50ms interval, 150ms ahead
+  Synth per bar:
+    - KICK: sine 150→0.01Hz over 0.3s, gain 0.9→0
+    - SNARE: lowpass noise on beats 2,4
+    - HI-HAT: highpass noise (>7000Hz) every 8th note
+    - BASS: sawtooth from array [55,55,82,55,65,55,82,110] per beat
+    - LEAD: square from array [440,550,494,660,550,440,392,494] on upbeats
+    - CHORD: 3 saws at bass × [1, 1.25, 1.5] on bar downbeat
+  Beat flash: triggered on phase wrap; beatFlash decays by 0.045/frame
+  Screen shake: 3.5px decays by 0.4/frame
+
+HUD:
+  Top bar: rgba(0,0,0, 0.38), height 46px
+  Left: Score (bold 22px) + Level (12px primary)
+  Center: Progress bar (240px, rounded, filled with primary)
+  Right: "⚠ BAHAYA!" (red flicker) or "✔ AMAN" (#00ff88)
+
+BACKGROUND:
+  - Sky gradient (level bg colors)
+  - Beat flash overlay (alpha = beatFlash × 0.07)
+  - Stars (90 twinkling dots)
+  - Geometric shapes (28 wireframe items, 2 parallax layers)
+  - Ground gradient + glow line (shadowBlur = 10 + beatFlash×18)
+  - Grid lines (primary color, 0.16 alpha, scrolling)
+
+════════════════════════════════════════════════════════════════════════════
+CHANGES MADE SO FAR
+════════════════════════════════════════════════════════════════════════════
+
+Files added:
+  ✓ js/particles.js (burst, trail, hitEffect, glowBurst)
+  ✓ js/background-animator.js (scanlines, floating elements, pulsing edges)
+  ✓ js/visual-effects.js (shake, bossBurst, vignette, danger flash, glitch)
+  ✓ js/menu-animations.js (idle animations, button glow, transitions)
+  ✓ assets/audio/bgm/level1.mp3 (Sunshine feat. moimoi)
+  ✓ assets/audio/bgm/level2.mp3 (Dream Away feat. Yukacco)
+  ✓ assets/audio/bgm/boss.mp3 (Ouvertüre)
+  ✓ assets/images/boss/ (folder for boss overlay screenshots)
+
+Files modified:
+  ✓ index.html (added script tags for new modules)
+  ✓ js/main.js (integrated AnimationFrameLoop, particles, effects, fixed Player.getPos)
+  ✓ js/config.js (level config, audio paths, overlay modes)
+  ✓ js/renderer.js (existing draw logic)
+  ✓ js/audio.js (BGM map initialization, playback)
+  ✓ js/player.js (physics, trail)
+  ✓ js/facebook.js (chaser, distanceToPlayer export)
+  ✓ js/memeOverlay.js (ghost feature)
+
+════════════════════════════════════════════════════════════════════════════
+QUICK START
+════════════════════════════════════════════════════════════════════════════
+
+Run local server:
+```powershell
+cd d:\mngodof\geometridash
+python -m http.server 8080
+# Open http://127.0.0.1:8080 in browser
+```
+
+Verify:
+  - Menu animations play on idle
+  - Click "Mulai" or press Space
+  - BGM starts (user interaction needed for audio unlock)
+  - Play through levels, see particles on hit + danger effects
+  - Console (F12) should be clean (no errors)
+
+════════════════════════════════════════════════════════════════════════════
+NEXT TASKS (if continuing)
+════════════════════════════════════════════════════════════════════════════
+
+1. Convert .webm → .mp3 with ffmpeg (optional but recommended):
+```powershell
+ffmpeg -i assets/audio/bgm/level1.webm -vn -ab 192k assets/audio/bgm/level1.mp3
+ffmpeg -i assets/audio/bgm/level2.webm -vn -ab 192k assets/audio/bgm/level2.mp3
+ffmpeg -i assets/audio/bgm/boss.webm -vn -ab 192k assets/audio/bgm/boss.mp3
+```
+
+2. Integrate boss screenshot overlay:
+   - Add screenshot to: assets/images/boss/screenshot_boss.png
+   - Hook into memeOverlay.js for level 4 activation
+
+3. Expand Web Audio synthesis (optional):
+   - Add dynamic EQ/filters per level
+   - Add bass envelope modulation
+   - Sync more visuals (scale, rotation) to synth parameters
+
+4. Tweaks via CONFIG:
+   - Adjust particle count, intensity, alpha
+   - Tweak screen shake duration/intensity
+   - Modify ghost message spawn rates
+   - Balance obstacle difficulty per level
+
+════════════════════════════════════════════════════════════════════════════
+NOTES
+════════════════════════════════════════════════════════════════════════════
+
+- Modular design allows easy feature swaps and testing.
+- Audio engine is initialized but integrated with BGM playback; optional synth synthesis can be added.
+- All visuals are canvas-drawn (no image sprites for core gameplay).
+- Responsive scaling: canvas 800×450 scales to fit viewport (max 1.6× scale).
+- Browser autoplay policy requires user interaction to play audio (first click/tap unlocks AudioContext).
+
+════════════════════════════════════════════════════════════════════════════

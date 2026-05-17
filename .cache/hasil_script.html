@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en-us">
+  <head>
+    <meta charset="utf-8" />
+    <title>Geometry Dash Lite</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        background-color: #231f20;
+        overflow: hidden;
+      }
+      #gameContainer {
+        width: 100vw;
+        height: 100vh;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="gameContainer"></div>
+
+    <script src="https://rawcdn.githack.com/threekho/gdl/d0f49900e902b11c3e0c3656a9c267451ec0a7b6/Build/UnityLoader.js"></script>
+
+    <script>
+      var gameInstance = UnityLoader.instantiate(
+        "gameContainer",
+        "https://rawcdn.githack.com/threekho/gdl/d0f49900e902b11c3e0c3656a9c267451ec0a7b6/Build/GeometryDashLite.json",
+      );
+    </script>
+  </body>
+</html>

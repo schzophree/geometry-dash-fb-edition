@@ -6,7 +6,6 @@ Baca seluruh codebase yang ada, lalu terapkan semua perubahan berikut.
 REPO REFERENCE
 ══════════════════════════════════════════════════════
 GitHub: https://github.com/schzophree/geometry-dash-fb-edition
-Assets folder: geometry-dash-assets/ ← spritesheet ada di sini
 Folder musik: music/
 level1.mp3 → DJ Genki VS Camellia - Sunshine feat. moimoi [170 BPM]
 level2.mp3 → DJ Noriken & DJ Genki - Dream Away feat. Yukacco [175 BPM]

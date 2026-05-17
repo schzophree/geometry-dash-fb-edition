@@ -2,6 +2,7 @@ import { CONFIG } from './config.js';
 
 export class FacebookChaser {
   constructor() {
+    this.jumpQueue = []; // Store player jumps with timestamps
     this.reset();
   }
 
@@ -10,18 +11,53 @@ export class FacebookChaser {
     this.w = CONFIG.facebook.w;
     this.h = CONFIG.facebook.h;
     this.y = CONFIG.GROUND_Y - this.h;
+    this.vy = 0;
+    this.gravity = 0.85;
+    this.jumpForce = -14.8;
+    this.onGround = true;
     this.wobble = 0;
     this.angry = false;
+    this.jumpQueue = [];
+    this.jumpDelayMs = 450; // Delay in milliseconds (approx 0.45s)
   }
 
   update(player, levelSpeed, score, frame) {
+    const now = performance.now();
     const pressure = Math.min(CONFIG.facebook.maxPressure, score * 0.006);
     const targetX = player.x - CONFIG.facebook.targetGap + pressure;
     const chaseSpeed = levelSpeed * 0.36 + score * 0.00035;
+    
+    // Horizontal movement
     this.x += Math.min(chaseSpeed, Math.max(-1.2, targetX - this.x)) * 0.72;
     if (this.x > targetX + 28) this.x += (targetX - this.x) * 0.08;
+
+    // JUMP LOGIC WITH DELAY
+    // 1. Record player jump
+    if (player.vy < -2 && player.onGround === false && (this.jumpQueue.length === 0 || now - this.jumpQueue[this.jumpQueue.length-1].t > 300)) {
+        this.jumpQueue.push({ t: now });
+    }
+
+    // 2. Check queue for delayed jump execution
+    if (this.jumpQueue.length > 0 && this.onGround) {
+        if (now - this.jumpQueue[0].t >= this.jumpDelayMs) {
+            this.vy = this.jumpForce;
+            this.onGround = false;
+            this.jumpQueue.shift(); // Remove handled jump
+        }
+    }
+
+    // Vertical Physics
+    this.vy += this.gravity;
+    this.y += this.vy;
+
+    // Floor collision
+    if (this.y + this.h >= CONFIG.GROUND_Y) {
+        this.y = CONFIG.GROUND_Y - this.h;
+        this.vy = 0;
+        this.onGround = true;
+    }
+
     this.wobble = Math.sin(frame * 0.09) * 5;
-    this.y = CONFIG.GROUND_Y - this.h + this.wobble;
     this.angry = this.distanceTo(player) < CONFIG.facebook.angryDistance;
   }
 
@@ -31,59 +67,42 @@ export class FacebookChaser {
 
   caught(player) {
     if (player.isInvincible()) return false;
-    return this.x + this.w > player.x + 8;
+    const horizontalHit = this.x + this.w > player.x + 8;
+    const verticalHit = Math.abs(this.y - player.y) < player.size + 40;
+    return horizontalHit && verticalHit;
   }
 
-  retreat(amount = 120) {
-    this.x = Math.min(CONFIG.facebook.x, this.x - amount);
-  }
-
-  draw(ctx, theme, beatFlash) {
+  draw(ctx, theme, beatFlash, assets) {
     const cx = this.x + this.w / 2;
     const cy = this.y + this.h / 2;
     const color = this.angry ? '#ff263f' : theme.fbC;
 
     ctx.save();
+    ctx.shadowColor = 'red';
+    ctx.shadowBlur = 20 + beatFlash * 25;
     ctx.translate(cx, cy);
-    ctx.rotate(Math.sin(cx * 0.02) * 0.08);
-    ctx.shadowColor = color;
-    ctx.shadowBlur = 12 + beatFlash * 18;
+    ctx.rotate(Math.sin(cx * 0.015) * 0.1);
 
-    const grad = ctx.createRadialGradient(-8, -10, 5, 0, 0, this.w / 2);
-    grad.addColorStop(0, '#ffffff');
-    grad.addColorStop(0.18, color);
-    grad.addColorStop(1, '#11182d');
-    ctx.fillStyle = grad;
-    ctx.beginPath();
-    ctx.arc(0, 0, this.w / 2, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = this.angry ? '#ffffff' : 'rgba(255,255,255,0.78)';
-    ctx.stroke();
-
-    ctx.shadowBlur = 0;
-    ctx.fillStyle = '#ffffff';
-    ctx.font = `bold ${this.w * 0.74}px Arial`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('f', 3, 3);
-
-    if (this.angry) {
-      ctx.strokeStyle = '#190000';
-      ctx.lineWidth = 3;
+    const img = assets && assets.images ? assets.images.get('fb_monster') : null;
+    if (img) {
+      let scale = 1.0;
+      if (this.angry) {
+          scale = 1.08 + Math.sin(performance.now() / 40) * 0.06;
+          ctx.filter = 'brightness(1.2) contrast(1.3) hue-rotate(-10deg)';
+      }
+      ctx.scale(scale, scale);
+      ctx.drawImage(img, -this.w / 2, -this.h / 2, this.w, this.h);
+    } else {
+      ctx.fillStyle = color;
       ctx.beginPath();
-      ctx.moveTo(-15, -15);
-      ctx.lineTo(-4, -10);
-      ctx.moveTo(15, -15);
-      ctx.lineTo(4, -10);
-      ctx.stroke();
-
-      ctx.fillStyle = '#190000';
-      ctx.beginPath();
-      ctx.arc(-10, -5, 3, 0, Math.PI * 2);
-      ctx.arc(10, -5, 3, 0, Math.PI * 2);
+      ctx.arc(0, 0, this.w / 2, Math.PI, 0); 
       ctx.fill();
+      
+      ctx.fillStyle = '#fff';
+      ctx.font = `bold ${this.w * 0.8}px Arial`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('f', 0, -5);
     }
 
     ctx.restore();

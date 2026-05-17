@@ -2,6 +2,8 @@
 // VISUAL-EFFECTS.JS — Efek Visual Overlay & Screen Shake
 // ============================================================
 
+import { CONFIG } from './config.js';
+
 export const VisualEffects = (() => {
   let screenShakeIntensity = 0;
   let screenShakeTime = 0;
@@ -134,6 +136,45 @@ export const VisualEffects = (() => {
           ctx.fillRect(0, h-50, w, 50);
         }
       }
+    },
+
+    drawGrid(ctx, theme, scroll, beatFlash, levelName) {
+      if (levelName === 'BOSS') return;
+      ctx.save();
+      const gridColor = levelName === 'LOADING' ? theme.line : theme.accent;
+      ctx.strokeStyle = gridColor || '#00d4ff';
+      ctx.globalAlpha = 0.3 + (beatFlash || 0) * 0.2;
+      ctx.lineWidth = 2;
+      
+      const step = 40;
+      const W = CONFIG.W || 800; 
+      const H = CONFIG.H || 450;
+      const GROUND_Y = CONFIG.GROUND_Y || 385;
+      
+      const offX = -(scroll % step);
+      ctx.beginPath();
+      // vertical lines
+      for (let x = offX; x <= W; x += step) {
+        ctx.moveTo(x, GROUND_Y);
+        ctx.lineTo(x, H);
+      }
+      // horizontal lines
+      for (let y = GROUND_Y; y <= H; y += step) {
+        ctx.moveTo(0, y);
+        ctx.lineTo(W, y);
+      }
+      ctx.stroke();
+      ctx.restore();
+    },
+
+    drawGroundGlow(ctx, theme, beatFlash) {
+      ctx.save();
+      const W = CONFIG.W || 800;
+      const GROUND_Y = CONFIG.GROUND_Y || 385;
+      ctx.fillStyle = theme.primary || '#00d4ff';
+      ctx.globalAlpha = 0.2 + (beatFlash || 0) * 0.3;
+      ctx.fillRect(0, GROUND_Y, W, 4);
+      ctx.restore();
     },
 
     clear() {

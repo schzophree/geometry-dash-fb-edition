@@ -25,25 +25,22 @@ export class Player {
     this.trail = [];
   }
 
-  update(isJumpHeld, solidFloorY = CONFIG.GROUND_Y) {
+  update(isJumpHeld, solidFloorY = CONFIG.GROUND_Y, solidCeilingY = 0) {
     this.wasOnGround = this.onGround || this.onCeiling;
     this.justLanded = false;
 
-    // Physics constants
     const gravForce = CONFIG.player.gravity * this.gravity;
-    const ceilingY = 64;
 
     if (this.mode === 'ship') {
-      const shipAccel = 0.8;
-      const shipMaxSpeed = 8.2;
+      const shipAccel = 0.95; // ditingkatkan agar lebih responsif naik
+      const shipMaxSpeed = 10.0;
       if (isJumpHeld) {
         this.vy -= shipAccel * this.gravity;
       } else {
-        this.vy += gravForce; // Ship also falls normally when not held
+        this.vy += gravForce * 1.15; // dikurangi agar jatuhnya lebih mulus dan tidak terlalu berat
       }
       this.vy = Math.min(shipMaxSpeed, Math.max(-shipMaxSpeed, this.vy));
       
-      // Auto-rotation for ship
       const targetRot = clamp(Math.atan2(this.vy, 9), -0.6, 0.6);
       this.rot += (targetRot - this.rot) * 0.18;
     } else {
@@ -61,13 +58,22 @@ export class Player {
       this.coyote = CONFIG.player.coyoteFrames;
       this.justLanded = !this.wasOnGround;
     } 
-    // Ceiling collision
-    else if (this.y <= ceilingY) {
-      this.y = ceilingY;
-      this.vy = 0;
-      this.onCeiling = true;
-      this.onGround = false;
-      this.justLanded = !this.wasOnGround;
+    // Ceiling collision — hanya nempel jika gravitasi terbalik
+    else if (this.y <= solidCeilingY) {
+      this.y = solidCeilingY;
+      if (this.gravity === -1) {
+        // Gravitasi terbalik: langit-langit jadi lantai
+        this.vy = 0;
+        this.onCeiling = true;
+        this.onGround = false;
+        this.coyote = CONFIG.player.coyoteFrames;
+        this.justLanded = !this.wasOnGround;
+      } else {
+        // Gravitasi normal: mantul balik ke bawah
+        this.vy = Math.abs(this.vy) * 0.3; // pantul lemah ke bawah
+        this.onCeiling = false;
+        this.onGround = false;
+      }
     }
     else {
       this.onGround = false;
@@ -75,13 +81,14 @@ export class Player {
       this.coyote = Math.max(0, this.coyote - 1);
     }
 
-    // Rotation logic
+    // GD-style rotation: fast snap on ground, smooth spin in air
     if (this.mode === 'cube') {
       if (this.onGround || this.onCeiling) {
+        // Snap rotation to nearest 90 degrees quickly
         const snap = Math.round(this.rot / (Math.PI / 2)) * (Math.PI / 2);
-        this.rot += (snap - this.rot) * 0.45;
+        this.rot += (snap - this.rot) * 0.6; // Faster snap (was 0.45)
       } else {
-        this.rot += 0.11 * this.gravity;
+        this.rot += 0.12 * this.gravity; // Slightly faster spin
       }
     } else if (this.mode === 'ball') {
       if (!(this.onGround || this.onCeiling)) {
@@ -89,7 +96,11 @@ export class Player {
       }
     }
 
-    if (isJumpHeld && this.justLanded && this.mode !== 'ship') this.jump();
+    // Auto-jump when holding on landing or press jump on ground (GD mechanic)
+    const canAutoJump = (this.gravity === 1 && this.onGround) || (this.gravity === -1 && this.onCeiling);
+    if (isJumpHeld && canAutoJump && this.mode !== 'ship') {
+      this.jump();
+    }
     if (this.invincible > 0) this.invincible--;
 
     this.trail.push({
@@ -117,8 +128,12 @@ export class Player {
       return false;
     }
 
-    if (this.onGround || this.onCeiling || this.coyote > 0 || customVy !== null) {
-      this.vy = (customVy !== null ? customVy : -14.2) * this.gravity;
+    const canJump = (this.gravity === 1 && (this.onGround || this.coyote > 0)) ||
+                    (this.gravity === -1 && (this.onCeiling || this.coyote > 0)) ||
+                    customVy !== null;
+
+    if (canJump) {
+      this.vy = (customVy !== null ? customVy : CONFIG.player.jumpForce) * this.gravity;
       this.onGround = false;
       this.onCeiling = false;
       this.coyote = 0;
@@ -130,13 +145,11 @@ export class Player {
   setMode(mode) {
     if (this.mode === mode) return;
     this.mode = mode;
-    // Reset rotation style if needed
   }
 
   setGravity(g) {
     this.gravity = g;
   }
-
 
   hit() {
     this.invincible = CONFIG.player.invincibleFrames;
@@ -162,9 +175,10 @@ export class Player {
       ctx.save();
       ctx.globalAlpha = item.life * 0.42;
       ctx.translate(item.x + item.sz / 2, item.y + item.sz / 2);
+      if (item.gravity === -1) ctx.scale(1, -1);
       ctx.rotate(item.rot);
-      ctx.fillStyle = theme.accent;
-      ctx.shadowColor = theme.accent;
+      ctx.fillStyle = '#00ff44';
+      ctx.shadowColor = '#00ff44';
       ctx.shadowBlur = 4;
       ctx.fillRect(-item.sz / 2, -item.sz / 2, item.sz, item.sz);
       ctx.restore();
