@@ -1,17 +1,17 @@
-import { CONFIG, clamp, getLevel, syncCanvasLayout } from './config.js?v=7';
-import { perfSampleFrame, resetPerfSampling, getPerfConfig } from './perf.js?v=7';
-import { VisualEffects } from './visual-effects.js?v=7';
-import { AssetLoader, blendThemes, createShapes, createStars } from './assets.js?v=7';
-import { AudioEngine } from './audio.js?v=7';
-import { Player } from './player.js?v=7';
-import { ObstacleManager } from './obstacles.js?v=7';
-import { FacebookChaser } from './facebook.js?v=7';
-import { GhostStatus } from './ghost.js?v=7';
-import { HUD } from './hud.js?v=7';
-import { Screens } from './screens.js?v=7';
-import { createStageArt, drawStageBack, drawStageFront } from './stage-art.js?v=7';
-import { CyberDemonBoss } from './boss.js?v=7';
-import { BOSS_MAPPING } from './level-data.js?v=7';
+import { CONFIG, clamp, getLevel, intersects, syncCanvasLayout } from './config.js';
+import { perfSampleFrame, resetPerfSampling, getPerfConfig } from './perf.js';
+import { VisualEffects } from './visual-effects.js';
+import { AssetLoader, blendThemes, createShapes, createStars } from './assets.js';
+import { AudioEngine } from './audio.js';
+import { Player } from './player.js';
+import { ObstacleManager } from './obstacles.js';
+import { FacebookChaser } from './facebook.js';
+import { GhostStatus } from './ghost.js';
+import { HUD } from './hud.js';
+import { Screens } from './screens.js';
+import { createStageArt, drawStageBack, drawStageFront } from './stage-art.js';
+import { CyberDemonBoss } from './boss.js';
+import { BOSS_MAPPING } from './level-data.js';
 
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
@@ -23,6 +23,7 @@ let state = 'loading';
 let selectedLevel = 0;
 let currentLevelIndex = 0;
 let score = 0;
+let totalDeaths = 0;
 let lives = CONFIG.gameplay.startLives;
 let gameSpeed = getLevel(0).speed;
 let obInterval = getLevel(0).obInterval;
@@ -72,8 +73,24 @@ if (devParams.has('level')) {
 // --- Initialization ---
 resizeCanvas();
 window.addEventListener('resize', resizeCanvas);
-bindUI();
+
+// Initialize core objects immediately (synchronously)
+assets = new AssetLoader();
+audio = new AudioEngine(window.MUSIC_LIST || []);
+screens = new Screens();
+player = new Player();
+obstacles = new ObstacleManager();
+facebook = new FacebookChaser();
+ghost = new GhostStatus();
+hud = new HUD();
+stars = createStars();
+shapes = createShapes();
+stageArt = createStageArt();
+cyberBoss = new CyberDemonBoss(BOSS_MAPPING);
+
+// Start the loop only after objects exist to prevent ReferenceErrors
 requestAnimationFrame(loop);
+bindUI();
 
 bootstrap().catch((err) => {
   console.error('[FATAL] Bootstrap failed:', err);
@@ -84,24 +101,11 @@ bootstrap().catch((err) => {
 async function bootstrap() {
   console.log('[bootstrap] starting...');
   try {
-    assets = new AssetLoader();
-    audio = new AudioEngine(window.MUSIC_LIST || []);
-    screens = new Screens();
-    player = new Player();
-    obstacles = new ObstacleManager();
-    facebook = new FacebookChaser();
-    ghost = new GhostStatus();
-    hud = new HUD();
-    stars = createStars();
-    shapes = createShapes();
-    stageArt = createStageArt();
-    cyberBoss = new CyberDemonBoss(BOSS_MAPPING);
-    console.log('[bootstrap] objects initialized');
-
     screens.setTheme(getLevel(0).theme);
     drawLoadingFrame();
 
-    await Promise.all([
+    // Add a fail-safe timeout to preload (60 seconds)
+    const preloadPromise = Promise.all([
       assets.preload((progress) => {
         assetProgress = progress;
         updateProgress();
@@ -111,10 +115,16 @@ async function bootstrap() {
         updateProgress();
       }),
     ]);
+
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Preload timeout')), 60000)
+    );
+
+    await Promise.race([preloadPromise, timeoutPromise]);
     console.log('[bootstrap] preload finished');
   } catch (err) {
-    console.error('[bootstrap] error during initialization:', err);
-    throw err;
+    console.error('[bootstrap] initialization error or timeout:', err);
+    // Continue anyway to avoid being stuck at 0%
   }
 
   state = 'start';
@@ -134,7 +144,9 @@ window.startGame = () => {
 
 function updateProgress() {
   const pct = Math.round((assetProgress * 0.72 + audioProgress * 0.28) * 100);
-  screens.showLoading(pct / 100);
+  if (screens && typeof screens.showLoading === 'function') {
+    screens.showLoading(pct / 100);
+  }
 }
 
 function getMusicEntryForLevel(levelIndex) {
@@ -145,14 +157,16 @@ function getMusicEntryForLevel(levelIndex) {
 }
 
 function checkAndSaveCheckpoint() {
-  if (currentLevelIndex < 1 || currentLevelIndex === 2) return;
-  const ml = getMusicEntryForLevel(currentLevelIndex);
-  if (!ml || ml.scoreEnd == null) return;
+  // Hanya simpan checkpoint di Level 1 (index 0). 
+  if (currentLevelIndex !== 0) return;
 
-  const levelStart = currentLevelIndex === 0 ? 0 : currentLevelIndex === 1 ? 900 : 2100;
-  const levelEnd = ml.scoreEnd === Infinity ? levelStart + 1700 : ml.scoreEnd;
+  const ml = getMusicEntryForLevel(currentLevelIndex);
+  const levelStart = 0;
+  const levelEnd = !ml || ml.scoreEnd == null || ml.scoreEnd === Infinity ? 900 : ml.scoreEnd;
   const span = Math.max(1, levelEnd - levelStart);
-  const progress = Math.min((score - levelStart) / span, 1);
+  const audioProgressVal = typeof audio?.progress === 'function' ? audio.progress() : 0;
+  const scoreProgress = Math.min(Math.max((score - levelStart) / span, 0), 1);
+  const progress = Math.min(Math.max(audioProgressVal || scoreProgress, scoreProgress), 1);
 
   for (const threshold of CP_THRESHOLDS) {
     if (progress >= threshold && lastProgressCpThreshold < threshold) {
@@ -167,8 +181,6 @@ function checkAndSaveCheckpoint() {
         obInterval,
         audioTime: audio.currentTime(),
       });
-      // Hanya tampilkan tulisan CHECKPOINT di level BOSS, level 2 diam-diam saja
-      if (currentLevelIndex !== 1) screens?.checkpoint();
       console.log(`[Checkpoint] Saved at ${Math.round(progress * 100)}%`, { ...progressCheckpoint });
       break;
     }
@@ -215,43 +227,47 @@ function resumeFromProgressCheckpoint() {
 }
 
 function loop(now) {
-  perfSampleFrame(now, rawLoopPrev);
-  rawLoopPrev = now;
+  try {
+    perfSampleFrame(now, rawLoopPrev);
+    rawLoopPrev = now;
 
-  const prevFrameAt = lastTime;
-  if (transition && now - prevFrameAt > 500) {
-    console.warn('[Watchdog] transition timeout → clear blend');
-    transition = null;
-    utilityCollisionLock = false;
-  }
-
-  const dt = Math.min(2.25, (now - prevFrameAt) / 16.6667 || 1);
-  lastTime = now;
-  frame += dt;
-
-  if (state === 'loading') {
-    bgScroll += 1.6 * dt;
-    drawLoadingFrame();
-  } else if (state === 'start') {
-    if (!perfSamplingStarted) {
-      resetPerfSampling();
-      perfSamplingStarted = true;
+    const prevFrameAt = lastTime;
+    if (transition && now - prevFrameAt > 500) {
+      console.warn('[Watchdog] transition timeout → clear blend');
+      transition = null;
+      utilityCollisionLock = false;
     }
-    bgScroll += 1.8 * dt;
-    beatFlash *= 0.96;
-    drawScene(false);
-  } else if (state === 'playing') {
-    updatePlaying(dt);
-    drawScene(true);
-  } else if (state === 'dead') {
-    updateImpactParticles(dt);
-    bgScroll += 1.3 * dt;
-    drawScene(false);
-  } else if (state === 'complete') {
-    updateImpactParticles(dt);
-    beatFlash *= 0.96;
-    screenShake *= 0.88;
-    drawScene(true);
+
+    const dt = Math.min(2.25, (now - prevFrameAt) / 16.6667 || 1);
+    lastTime = now;
+    frame += dt;
+
+    if (state === 'loading') {
+      bgScroll += 1.6 * dt;
+      drawLoadingFrame();
+    } else if (state === 'start') {
+      if (!perfSamplingStarted) {
+        resetPerfSampling();
+        perfSamplingStarted = true;
+      }
+      bgScroll += 1.8 * dt;
+      beatFlash *= 0.96;
+      drawScene(false);
+    } else if (state === 'playing') {
+      updatePlaying(dt);
+      drawScene(true);
+    } else if (state === 'dead') {
+      updateImpactParticles(dt);
+      bgScroll += 1.3 * dt;
+      drawScene(false);
+    } else if (state === 'complete') {
+      updateImpactParticles(dt);
+      beatFlash *= 0.96;
+      screenShake *= 0.88;
+      drawScene(true);
+    }
+  } catch (e) {
+    console.error('[loop] error:', e);
   }
 
   requestAnimationFrame(loop);
@@ -298,39 +314,68 @@ function updatePlaying(dt) {
   }
 
   if (activeLevel.index === 2) {
-    cyberBoss.update(dt, audioTime, beatFlash, player.hitbox());
-    screenShake = Math.max(screenShake, cyberBoss.takeShake());
+    cyberBoss.update(dt, audioTime, beatFlash, player.hitbox(), audio.progress());
+    
+    // Player bullets hit boss
+    const bossHitbox = {
+      x: cyberBoss.x - 128 * cyberBoss.scale,
+      y: cyberBoss.y - 136 * cyberBoss.scale,
+      w: 256 * cyberBoss.scale,
+      h: 272 * cyberBoss.scale,
+    };
+    for (const b of player.bullets) {
+      const bulletHitbox = {
+        x: b.x - b.size / 2,
+        y: b.y - b.size / 2,
+        w: b.size,
+        h: b.size,
+      };
+      if (!b.hit && intersects(bulletHitbox, bossHitbox)) {
+        b.hit = true;
+        b.life = 0;
+        cyberBoss.takeHit();
+        spawnImpact(b.x, b.y, '#ffffff', 8);
+      }
+    }
+
+    const shake = cyberBoss.takeShake();
+    if (shake > 0) {
+      screenShake = Math.max(screenShake, shake);
+      // If the shake is high, it's likely a laser fire event
+      if (shake >= 10) VisualEffects.triggerInvert(0.5);
+    }
   }
   ghost.update(dt, frame);
+  VisualEffects.update(dt);
   updateImpactParticles(dt);
 
-  const hitObs = obstacles.collidesWithPlayer(player.hitbox());
   let solidFloorY = CONFIG.GROUND_Y;
-  let solidCeilingY = 0; // Default level ceiling boundary
+  let solidCeilingY = 0; 
 
   for (const obs of obstacles.obstacles) {
     if (obs.inactive || obs.type.startsWith('portal_') || obs.type.startsWith('orb_') || obs.type === 'spike') continue;
+    if (!obs.solid && obs.type !== 'trampoline' && obs.type !== 'triangle_step') continue;
     
     if (player.x + player.size > obs.x && player.x < obs.x + obs.w) {
       if (obs.type === 'trampoline') {
         if (player.gravity === 1 && player.y + player.size <= obs.y + 14 && player.vy >= 0) {
           solidFloorY = Math.min(solidFloorY, obs.y);
         }
-      } else if (obs.type === 'triangle_step') {
+      } else if (obs.type === 'triangle_step' || obs.type.startsWith('slope_')) {
         const progress = Math.max(0, Math.min(1, (player.x + player.size - obs.x) / obs.w));
         let stepY;
-        if (obs.direction === 'up') {
+        if (obs.direction === 'up' || obs.type === 'slope_up') {
           stepY = obs.y + obs.h - (progress * obs.h);
         } else {
           stepY = obs.y + (progress * obs.h);
         }
-        if (player.gravity === 1 && player.y + player.size <= stepY + 14 && player.vy >= 0) {
+        if (player.gravity === 1 && player.y + player.size <= stepY + 26 && player.vy >= 0) {
           solidFloorY = Math.min(solidFloorY, stepY);
         }
       } else {
-        if (player.gravity === 1 && player.y + player.size <= obs.y + 12 && player.vy >= 0) {
+        if (player.gravity === 1 && player.y + player.size <= obs.y + 24 && player.vy >= 0) {
           solidFloorY = Math.min(solidFloorY, obs.y);
-        } else if (player.gravity === -1 && player.y >= obs.y + obs.h - 12 && player.vy <= 0) {
+        } else if (player.gravity === -1 && player.y >= obs.y + obs.h - 24 && player.vy <= 0) {
           solidCeilingY = Math.max(solidCeilingY, obs.y + obs.h);
         }
       }
@@ -342,10 +387,12 @@ function updatePlaying(dt) {
     jumpBufferTimer -= dt * 16.666;
   }
 
-  // Handle jump input + play SFX
   const oldVy = player.vy;
-  player.update(wantsToJump, solidFloorY, solidCeilingY);
-  // Detect if jump actually occurred (velocity changed towards jump direction)
+  player.update(wantsToJump, solidFloorY, solidCeilingY, dt, {
+    autoFire: activeLevel.index === 2,
+    targetBossX: cyberBoss.x,
+    targetBossY: cyberBoss.y
+  });
   const jumped = (player.gravity === 1 && player.vy < 0 && (oldVy >= 0 || player.justLanded)) ||
                  (player.gravity === -1 && player.vy > 0 && (oldVy <= 0 || player.justLanded));
 
@@ -353,10 +400,11 @@ function updatePlaying(dt) {
     if (!player.wasOnGround && !player.onGround && !player.onCeiling && player.coyote <= 0 && player.mode !== 'ship') {
        // already jumping
     } else {
-        jumpBufferTimer = 0; // Clear buffer
+        jumpBufferTimer = 0; 
     }
   }
 
+  const hitObs = obstacles.collidesWithPlayer(player.hitbox());
   if (hitObs) {
     if (hitObs.type === 'utility') {
       const obs = hitObs.obs;
@@ -384,15 +432,19 @@ function updatePlaying(dt) {
         }
       }
     } else if (hitObs.type === 'springpad') {
-      // Trampoline bounce
       player.vy = -hitObs.obs.springPower;
       screenShake = Math.max(screenShake, 2);
       beatFlash = 0.6;
+    } else if (hitObs.type === 'secret_coin') {
+      hitObs.obs.inactive = true;
+      score += 500; // Bonus score
+      audio.playBossCheckpointCue(); // Use as placeholder for collection sound
+      VisualEffects.checkpointPulse();
     } else if (hitObs.type === 'lethal' && !player.isInvincible()) {
       applyDamage('Kena rintangan neon.');
     }
   } else if (CONFIG.gameplay.facebookChaserEnabled && !player.isInvincible() && facebook.caught(player)) {
-    triggerGameOver('Logo Fesnuk berhasil nyentuh cube.');
+    applyDamage('Logo Fesnuk berhasil nyentuh cube.');
     facebook.reset();
   }
 
@@ -405,6 +457,12 @@ function updatePlaying(dt) {
 }
 
 function handleOrb(type) {
+  // Disable all JUMP orbs (Yellow, Green, Red) for Boss Level as requested
+  // Only Blue Orb (Gravity Switch) remains functional
+  if (currentLevelIndex === 2 && (type === 'orb_yellow' || type === 'orb_green' || type === 'orb_red')) {
+    return;
+  }
+
   if (type === 'orb_yellow') {
     player.jump(-14.2);
     VisualEffects.beatPulse(0.6);
@@ -424,11 +482,11 @@ function handleOrb(type) {
 }
 
 function handlePortal(type) {
-  if (type === 'portal_ship' && player.mode !== 'ship') player.setMode('ship');
-  else if (type === 'portal_cube' && player.mode !== 'cube') player.setMode('cube');
-  else if (type === 'portal_ball' && player.mode !== 'ball') player.setMode('ball');
-  else if (type === 'portal_gravity_up' && player.gravity !== -1) player.setGravity(-1);
-  else if (type === 'portal_gravity_down' && player.gravity !== 1) player.setGravity(1);
+  if (type.includes('ship') && player.mode !== 'ship') player.setMode('ship');
+  else if (type.includes('cube') && player.mode !== 'cube') player.setMode('cube');
+  else if (type.includes('ball') && player.mode !== 'ball') player.setMode('ball');
+  else if (type.includes('gravity_up') && player.gravity !== -1) player.setGravity(-1);
+  else if (type.includes('gravity_down') && player.gravity !== 1) player.setGravity(1);
 }
 
 function handleLevelTransition() {
@@ -456,14 +514,24 @@ function handleLevelTransition() {
 
   if (!shownCheckpoints.has(nextIndex)) {
     shownCheckpoints.add(nextIndex);
-    screens.checkpoint();
+    if (nextIndex !== 1 && nextIndex !== 2) {
+      screens.checkpoint();
+    }
     screenShake = Math.max(screenShake, CONFIG.camera.shakeOnTransition.intensity);
   }
 
   const previousTheme = getLevel(currentLevelIndex).theme;
   currentLevelIndex = nextIndex;
   const level = getLevel(currentLevelIndex);
-  if (level.name === 'BOSS') audio.playBossCheckpointCue();
+
+  if (level.name === 'BOSS') {
+    audio.playBossCheckpointCue();
+    obstacles.mirrorMode = true;
+  } else if (level.index >= 1) {
+    obstacles.mirrorMode = true;
+  } else {
+    obstacles.mirrorMode = false;
+  }
 
   transition = { from: previousTheme, to: level.theme, started: performance.now(), duration: 2500 };
   levelTransitionFx = { label: level.label, name: level.name, started: performance.now(), duration: 2500 };
@@ -475,8 +543,9 @@ function handleLevelTransition() {
 }
 
 function applyDamage(reason) {
-  if (player.isInvincible()) return;
+  if (player.isInvincible() || godMode) return;
   audio.playHitSfx();
+  totalDeaths++;
   cyberBoss?.notifyPlayerDamaged?.();
 
   if (lives > 0) {
@@ -512,7 +581,21 @@ function triggerGameOver(reason) {
 function triggerLevelComplete() {
   if (state === 'complete') return;
   state = 'complete';
-  completeInfo = { score: Math.floor(score), song: audio.currentSongName(), started: performance.now() };
+  
+  if (getLevel(currentLevelIndex).name === 'BOSS') {
+    cyberBoss.triggerExplosion();
+    audio.playBossCheckpointCue();
+    VisualEffects.shake(20, 0.8);
+    VisualEffects.triggerInvert(0.4);
+  }
+
+  completeInfo = { 
+    score: Math.floor(score), 
+    song: audio.currentSongName(), 
+    deaths: totalDeaths,
+    levelName: getLevel(currentLevelIndex).name,
+    started: performance.now() 
+  };
   beatFlash = 1;
   screenShake = Math.max(screenShake, 6);
   audio.stop(false);
@@ -542,11 +625,12 @@ function startGame({ fromCheckpoint = false, levelIndex = selectedLevel, clearCh
       clearProgressCheckpoint();
     }
     currentLevelIndex = clamp(levelIndex, 0, CONFIG.levels.length - 1);
-    const level = getLevel(currentLevelIndex);
+    const lv = getLevel(currentLevelIndex);
     score = 0;
+    totalDeaths = 0;
     lives = CONFIG.gameplay.startLives;
-    gameSpeed = level.speed;
-    obInterval = level.obInterval;
+    gameSpeed = lv.speed;
+    obInterval = lv.obInterval;
   }
 
   const level = getLevel(currentLevelIndex);
@@ -564,6 +648,7 @@ function startGame({ fromCheckpoint = false, levelIndex = selectedLevel, clearCh
   player.reset();
   facebook.reset();
   obstacles.reset();
+  if (currentLevelIndex >= 1) obstacles.mirrorMode = true;
   ghost.reset();
   cyberBoss.reset();
   audio.playLevel(currentLevelIndex, fromCheckpoint ? (checkpoint?.audioTime || 0) : 0);
@@ -631,20 +716,30 @@ function drawScene(drawHud) {
     const rawP = Math.min(1, elapsed / transition.duration);
     const p = easeInOutCubic(rawP);
     theme = blendThemes(transition.from, transition.to, p);
-    // Flash overlay puncak di tengah transisi lalu memudar
     transitionFlash = Math.sin(rawP * Math.PI) * 0.18;
     if (rawP >= 1) transition = null;
   }
 
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, CONFIG.W, CONFIG.H);
+  ctx.fillStyle = theme.bg0 || '#02040a';
+  ctx.fillRect(0, 0, CONFIG.W, CONFIG.H);
 
   let shakeX = 0, shakeY = 0;
-  if (screenShake > 0.1) {
-    shakeX = (Math.random() - 0.5) * screenShake * 2;
-    shakeY = (Math.random() - 0.5) * screenShake * 2;
+  if (screenShake > 0.1 && !godMode) {
+    // Balanced shake around the center
+    shakeX = (Math.random() - 0.5) * Math.min(screenShake, 15) * 1.5;
+    shakeY = (Math.random() - 0.5) * Math.min(screenShake, 15) * 1.5;
   }
+
   ctx.save();
   ctx.translate(shakeX, shakeY);
+
+  // Overscan sedikit supaya tepi canvas tidak bolong saat camera shake.
+  ctx.save();
+  ctx.fillStyle = theme.bg0 || '#02040a';
+  ctx.fillRect(-32, -32, CONFIG.W + 64, CONFIG.H + 64);
+  ctx.restore();
 
   drawStageBack(ctx, stageArt, getLevel(currentLevelIndex), theme, bgScroll, beatFlash, frame);
   VisualEffects.drawGrid(ctx, theme, bgScroll, beatFlash, getLevel(currentLevelIndex).name);
@@ -652,50 +747,14 @@ function drawScene(drawHud) {
   if (activeShapes()) drawShapes(theme);
 
   if (state !== 'start') {
-    obstacles.draw(ctx, theme, beatFlash, assets);
     if (activeBoss()) cyberBoss.draw(ctx, assets, theme, player.hitbox(), beatFlash, frame);
-    player.drawTrail(ctx, theme);
-    assets.drawPlayer(ctx, player, theme, beatFlash);
+    ghost.draw(ctx, theme, player);
+    obstacles.draw(ctx, theme, beatFlash, assets);
     if (CONFIG.gameplay.facebookChaserEnabled) facebook.draw(ctx, theme, beatFlash, assets);
   }
 
   VisualEffects.drawGroundGlow(ctx, theme, beatFlash);
   drawStageFront(ctx, stageArt, getLevel(currentLevelIndex), theme, bgScroll, beatFlash, frame);
-
-  if (state !== 'start') {
-    ghost.draw(ctx, theme, player);
-  }
-
-  ctx.globalAlpha = 1;
-  for (const p of impactParticles) {
-    ctx.fillStyle = p.color;
-    ctx.globalAlpha = Math.max(0, p.life);
-    ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
-  }
-  ctx.globalAlpha = 1;
-
-  // Smooth transition flash overlay — warna memudar halus antar level
-  if (transitionFlash > 0.01) {
-    ctx.save();
-    ctx.globalAlpha = transitionFlash;
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, CONFIG.W, CONFIG.H);
-    ctx.restore();
-  }
-
-  if (drawHud) {
-    const dangerDist = CONFIG.gameplay.facebookChaserEnabled ? (player.x - facebook.x) : 1000;
-    hud.draw(ctx, {
-      score,
-      level: getLevel(currentLevelIndex),
-      theme,
-      lives,
-      checkpointActive: progressCheckpoint.saved,
-      dangerDistance: dangerDist,
-      beatFlash,
-      songProgress: audio.progress()
-    });
-  }
 
   if (levelTransitionFx) {
     const elapsed = performance.now() - levelTransitionFx.started;
@@ -717,22 +776,83 @@ function drawScene(drawHud) {
     }
   }
 
+  if (state !== 'start') {
+    player.drawTrail(ctx, theme);
+    player.drawBullets(ctx, theme);
+    assets.drawPlayer(ctx, player, theme, beatFlash);
+  }
+
+  ctx.globalAlpha = 1;
+  for (const p of impactParticles) {
+    ctx.fillStyle = p.color;
+    ctx.globalAlpha = Math.max(0, p.life);
+    ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
+  }
+  ctx.globalAlpha = 1;
+
+  ctx.restore();
+
+  if (activeBoss() && state !== 'complete') {
+    cyberBoss.drawMemeOverlay(ctx, assets);
+  }
+
+  // Overlay layar penuh tidak ikut camera shake.
+  if (transitionFlash > 0.01) {
+    ctx.save();
+    ctx.globalAlpha = transitionFlash;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, CONFIG.W, CONFIG.H);
+    ctx.restore();
+  }
+
   if (state === 'complete' && completeInfo) {
-    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillStyle = 'rgba(0,0,0,0.82)';
     ctx.fillRect(0, 0, CONFIG.W, CONFIG.H);
     ctx.fillStyle = '#fff';
     ctx.textAlign = 'center';
-    ctx.font = 'bold 54px Arial';
-    ctx.fillText('LEVEL CLEARED', CONFIG.W / 2, CONFIG.H / 2 - 40);
+
+    if (completeInfo.levelName === 'BOSS') {
+      ctx.font = 'bold 32px Arial';
+      ctx.fillStyle = '#ff3333';
+      ctx.fillText('KAMU BERHASIL MENAMATKAN', CONFIG.W / 2, CONFIG.H / 2 - 80);
+      ctx.font = 'bold 42px Arial';
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText('RAJA IBLIS FESNUK!', CONFIG.W / 2, CONFIG.H / 2 - 35);
+    } else {
+      ctx.font = 'bold 54px Arial';
+      ctx.fillText('LEVEL CLEARED', CONFIG.W / 2, CONFIG.H / 2 - 40);
+    }
+
     ctx.font = 'bold 24px Arial';
     ctx.fillStyle = theme.primary;
-    ctx.fillText(`Score: ${completeInfo.score}`, CONFIG.W / 2, CONFIG.H / 2 + 20);
+    ctx.fillText(`Final Score: ${completeInfo.score}`, CONFIG.W / 2, CONFIG.H / 2 + 25);
+
+    ctx.font = 'bold 18px Arial';
+    ctx.fillStyle = '#ff6666';
+    ctx.fillText(`Total Deaths: ${completeInfo.deaths}`, CONFIG.W / 2, CONFIG.H / 2 + 60);
+
     ctx.fillStyle = '#aaa';
     ctx.font = '16px Arial';
-    ctx.fillText('Press SPACE/ENTER to continue', CONFIG.W / 2, CONFIG.H / 2 + 70);
+    ctx.fillText('Click anywhere to Return to Menu', CONFIG.W / 2, CONFIG.H / 2 + 100);
   }
 
-  ctx.restore();
+  // Apply final visual overlays (invert glitch, beat pulse, etc.)
+  VisualEffects.draw(ctx, getLevel(currentLevelIndex).name.toLowerCase(), 1000);
+
+  // HUD digambar paling akhir dan tetap terhadap viewport, bukan world/camera.
+  if (drawHud && state !== 'complete') {
+    const dangerDist = CONFIG.gameplay.facebookChaserEnabled ? (player.x - facebook.x) : 1000;
+    hud.draw(ctx, {
+      score,
+      level: getLevel(currentLevelIndex),
+      theme,
+      lives,
+      dangerDistance: dangerDist,
+      beatFlash,
+      songProgress: audio.progress(),
+      godMode: godMode
+    });
+  }
 }
 
 function drawLoadingFrame() {
@@ -779,57 +899,48 @@ function drawStars(theme) {
 function drawShapes(theme) {
   if (!shapes) return;
   const count = Math.min(getPerfConfig().shapes, shapes.length);
-  ctx.strokeStyle = theme.primary;
-  ctx.lineWidth = 1.5;
+  const cloudImg = assets.get('decor_cloud');
+  
   for (let i = 0; i < count; i++) {
     const sh = shapes[i];
     sh.x -= sh.speed * (gameSpeed * 0.5);
-    sh.rot += sh.rs;
-    if (sh.x < -50) {
-      sh.x = CONFIG.W + 50;
-      sh.y = Math.random() * CONFIG.H;
+    if (sh.x < -120) {
+      sh.x = CONFIG.W + 120;
+      sh.y = 42 + Math.random() * (CONFIG.GROUND_Y * 0.35);
     }
+
+    const bob = Math.sin(frame * 0.02 + sh.phase) * 5;
+    const x = sh.x;
+    const y = sh.y + bob;
+    const s = sh.size * 1.5; // Make clouds a bit bigger
+
     ctx.save();
-    ctx.globalAlpha = 0.15;
-    ctx.translate(sh.x, sh.y);
-    ctx.rotate(sh.rot);
-    ctx.beginPath();
-    for (let j = 0; j < sh.sides; j++) {
-      const a = (j / sh.sides) * Math.PI * 2;
-      const r = sh.size;
-      if (j === 0) ctx.moveTo(Math.cos(a) * r, Math.sin(a) * r);
-      else ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+    ctx.globalAlpha = 0.45;
+    if (cloudImg) {
+      // Draw actual cloud image instead of vector shapes
+      ctx.drawImage(cloudImg, x - s/2, y - s/2, s, s * 0.6);
+    } else {
+      // Fallback to cleaner simple circle if image not loaded
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(x, y, s * 0.4, 0, Math.PI * 2);
+      ctx.fill();
     }
-    ctx.closePath();
-    ctx.stroke();
     ctx.restore();
   }
-  ctx.globalAlpha = 1;
 }
 
 function resizeCanvas() {
   const wrap = document.getElementById('gameWrap');
   if (!wrap) return;
-  const winW = window.innerWidth;
-  const winH = window.innerHeight;
-  const aspect = 16 / 9;
-  let targetW = winW;
-  let targetH = winW / aspect;
-  if (targetH > winH) {
-    targetH = winH;
-    targetW = winH * aspect;
-  }
   canvas.width = 800;
   canvas.height = 450;
-  canvas.style.width = `${targetW}px`;
-  canvas.style.height = `${targetH}px`;
-  
-  // Center it visually
+  canvas.style.width = '100vw';
+  canvas.style.height = '100vh';
   canvas.style.position = 'absolute';
-  canvas.style.left = '50%';
-  canvas.style.top = '50%';
-  canvas.style.transform = 'translate(-50%, -50%)';
-
+  canvas.style.left = '0';
+  canvas.style.top = '0';
+  canvas.style.transform = 'none';
   syncCanvasLayout(canvas);
 }
 
@@ -841,6 +952,9 @@ function setStartPreviewLevel(idx) {
   gameSpeed = lv.speed;
 }
 
+let godMode = false;
+let cheatBuffer = '';
+
 function bindUI() {
   document.getElementById('startButton')?.addEventListener('click', () => {
     audio.unlock();
@@ -850,7 +964,7 @@ function bindUI() {
   const levelBtns = document.querySelectorAll('.level-choice');
   levelBtns.forEach((btn) => {
     btn.addEventListener('click', (e) => {
-      const lvl = Number(e.target.dataset.level);
+      const lvl = Number(e.currentTarget.dataset.level);
       setStartPreviewLevel(lvl);
     });
   });
@@ -879,6 +993,19 @@ function bindUI() {
   });
 
   window.addEventListener('keydown', (e) => {
+    // Secret Cheat: type 'moonchi'
+    cheatBuffer = (cheatBuffer + e.key.toLowerCase()).slice(-7);
+    if (cheatBuffer === 'moonchi') {
+      godMode = !godMode;
+      cheatBuffer = '';
+      console.log('%c [CHEAT] GOD MODE: ' + (godMode ? 'ON' : 'OFF'), 'color: #ff00ff; font-weight: bold;');
+      if (godMode) {
+        VisualEffects.checkpointPulse(); 
+      } else {
+        VisualEffects.triggerInvert(0.2); // Feedback for OFF
+      }
+    }
+
     if (e.code === 'Space' || e.code === 'ArrowUp') {
       if (state === 'start' && e.code === 'Space') {
         startGame({ levelIndex: selectedLevel, clearCheckpoint: true });
@@ -918,13 +1045,11 @@ function bindUI() {
       const scaleY = canvas.height / rect.height;
       const x = (clientX - rect.left) * scaleX;
       const y = (clientY - rect.top) * scaleY;
-      
       if (hud.hitPauseButton(x, y)) {
         pauseGame();
         return;
       }
     }
-    
     if (state === 'start') {
       startGame({ levelIndex: selectedLevel, clearCheckpoint: true });
       return;

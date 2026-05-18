@@ -29,7 +29,7 @@ const BackgroundAnimator = (() => {
         vy: Math.random() * 0.1 - 0.05,
         size: Math.random() * 2 + 1,
         opacity: Math.random() * 0.15 + 0.05,
-        type: Math.floor(Math.random() * 3) // 0: dot, 1: line, 2: triangle
+        type: Math.floor(Math.random() * 2) // 0: dot, 1: line (Triangle removed)
       });
     }
   }

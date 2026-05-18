@@ -7,15 +7,67 @@ import { CONFIG, randInt } from './config.js';
 function loadImageWithFallback(candidates) {
   return new Promise((resolve) => {
     let idx = 0;
+    const timeout = setTimeout(() => {
+      console.warn(`[AssetLoader] Timeout loading ${candidates[idx]}`);
+      resolve(null);
+    }, 15000); // Increased to 15 second timeout per attempt
+
     function tryNext() {
-      if (idx >= candidates.length) { resolve(null); return; }
+      if (idx >= candidates.length) {
+        clearTimeout(timeout);
+        resolve(null);
+        return;
+      }
       const img = new Image();
-      img.onload = () => resolve(img);
-      img.onerror = () => { idx++; tryNext(); };
+      img.onload = () => {
+        clearTimeout(timeout);
+        resolve(img);
+      };
+      img.onerror = () => {
+        idx++;
+        tryNext();
+      };
       img.src = candidates[idx];
     }
     tryNext();
   });
+}
+
+function removeNeutralMatte(img) {
+  const canvas = document.createElement('canvas');
+  canvas.width = img.naturalWidth || img.width;
+  canvas.height = img.naturalHeight || img.height;
+
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img, 0, 0);
+
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const data = imageData.data;
+
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    const a = data[i + 3];
+    
+    // Improved detection: remove if it's white (R,G,B > 250) 
+    // or if it's a very specific neutral gray matte
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    const diff = max - min;
+    
+    // Pure/Near-pure white usually represents the background in these assets
+    const isWhite = r > 252 && g > 252 && b > 252;
+    // More conservative matte removal: only remove if it's very neutral and in a specific range
+    const isNeutralMatte = diff <= 8 && max >= 180 && max <= 235;
+
+    if (a > 0 && (isWhite || isNeutralMatte)) {
+      data[i + 3] = 0;
+    }
+  }
+
+  ctx.putImageData(imageData, 0, 0);
+  return canvas;
 }
 
 export class AssetLoader {
@@ -24,84 +76,130 @@ export class AssetLoader {
     this.sprites = new Map();
     this.logo = null;
     this.playerCubeSprites = [];
+    this.overlayKeys = [];
   }
 
   async preload(onProgress = () => {}) {
-    // === Core UI & character assets ===
+    onProgress(0);
+
     const coreList = [
       { key: 'logo', src: ['assets/ui/loading_logo.png'] },
       { key: 'overlay1', src: ['assets/images/overlays/overlay-fokus-coding-scroll-fesnuk.png'] },
-      { key: 'fb_monster', src: ['assets/images/enemy/fb_monster.png'] },
-      { key: 'player_cube', src: [
-        'assets/images/player/characters/player.png',
-        'plan.assets/Texture2D/playerDash2_001.png'
-      ]},
+      { key: 'bossCyberDemon', src: ['assets/images/boss/cyber-demon-fb.png', 'assets/images/boss/raja_fesnuk.png'], removeMatte: true },
+      { key: 'boss_sheet', src: ['assets/images/boss/monstersprite.png'] },
+      { key: 'player_cube', src: ['assets/images/player/characters/player.png'] },
+      { key: 'player_ship', src: ['assets/images/player/ship/ship_01_001.png'] },
+      { key: 'player_ball', src: ['assets/images/player/ball/player_ball_01_001.png'] },
+      { key: 'secret_coin', src: ['assets/images/coins/secretCoin_01_001.png'] },
+      { key: 'decor_cloud', src: ['assets/images/decorations/clouds/CloudDecor01.png'] },
+      { key: 'decor_vine', src: ['assets/images/decorations/vines/VineDecor01.png'] },
     ];
 
-    // === Obstacle sprite assets (from Texture2D with fallback) ===
+    // Load meme overlays
+    const overlays = [
+      'overlay-action-consequences-editor.png', 'overlay-baca-buku-scroll-10-jam.png', 
+      'overlay-besok-kita-ngedit.png', 'overlay-fokus-coding-scroll-fesnuk.png',
+      'overlay-harga-ide-editing.png', 'overlay-i-hate-ngoding.png', 
+      'overlay-ide-masuk-penjara.png', 'overlay-js-atau-php.png', 
+      'overlay-komentar-ai-mecut.png', 'overlay-korban-kriminalisasi-jaksa.png',
+      'overlay-laptop-coding-konteks.png', 'overlay-level-kecanduan-facebook.png',
+      'overlay-lowongan-scroll-fesnuk.png', 'overlay-mending-scroll-fesnuk.png',
+      'overlay-ngoding-pay-to-win.png', 'overlay-obat-malas-coding.png',
+      'overlay-penulis-pemed-fb-terus.png', 'overlay-penyakit-facebook.png',
+      'overlay-rust-10-jam-vibe-coder.png', 'overlay-scroll-bentar-ah.png',
+      'overlay-skripsi-frieren.png', 'overlay-sql-select-fesnuk.png',
+      'overlay-token-habis-llm.png', 'overlay-web-desa-kumparan.png',
+      'overlay-website-100rb.png', 'overlay-whatsapp-vscode-panda.png'
+    ];
+    overlays.forEach(filename => {
+      coreList.push({ key: `overlay_${filename}`, src: [`assets/images/overlays/${filename}`] });
+    });
+    this.overlayKeys = overlays.map(f => `overlay_${f}`);
+
+    // Load laser aim animation frames (00-34)
+    for (let i = 0; i <= 34; i++) {
+      const num = i.toString().padStart(2, '0');
+      coreList.push({ 
+        key: `laser_aim_${i}`, 
+        src: [`assets/images/laser_aim/frame_${num}_delay-0.04s.png`],
+        removeMatte: true
+      });
+    }
+
+    // Load laser fire animation frames (0000-0017)
+    for (let i = 0; i <= 17; i++) {
+      const num = i.toString().padStart(4, '0');
+      coreList.push({ 
+        key: `laser_fire_${i}`, 
+        src: [`assets/images/laser_fire/laser_fire_${num}.png`],
+        removeMatte: true
+      });
+    }
+
     const obstacleList = [
-      // Spikes
-      { key: 'spike_01', src: ['assets/images/obstacles/spikes/RegularSpike01.png', 'plan.assets/Texture2D/RegularSpike01.png'] },
-      { key: 'spike_02', src: ['assets/images/obstacles/spikes/RegularSpike02.png', 'plan.assets/Texture2D/RegularSpike02.png'] },
-      { key: 'spike_03', src: ['assets/images/obstacles/spikes/RegularSpike03.png', 'plan.assets/Texture2D/RegularSpike03.png'] },
-      // Blocks
-      { key: 'block_01', src: ['assets/images/obstacles/blocks/BrickBlock01.png', 'plan.assets/Texture2D/BrickBlock01.png'] },
-      { key: 'block_02', src: ['assets/images/obstacles/blocks/ChequeredBlock01.png', 'plan.assets/Texture2D/ChequeredBlock01.png'] },
-      { key: 'block_03', src: ['assets/images/obstacles/blocks/GridBlock01.png', 'plan.assets/Texture2D/GridBlock01.png'] },
-      // Sawblades
-      { key: 'saw_01', src: ['assets/images/obstacles/sawblades/GearSawblade01.png', 'plan.assets/Texture2D/GearSawblade01.png'] },
-      { key: 'saw_02', src: ['assets/images/obstacles/sawblades/RegularSawblade01.png', 'plan.assets/Texture2D/RegularSawblade01.png'] },
-      // Portals
-      { key: 'portal_front_ship', src: ['assets/images/portals/portal_01_front_001.png', 'plan.assets/Texture2D/portal_01_front_001.png'] },
-      { key: 'portal_front_cube', src: ['assets/images/portals/portal_02_front_001.png', 'plan.assets/Texture2D/portal_02_front_001.png'] },
-      { key: 'portal_front_ball', src: ['assets/images/portals/portal_03_front_001.png', 'plan.assets/Texture2D/portal_03_front_001.png'] },
-      { key: 'portal_front_gravity', src: ['assets/images/portals/portal_05_front_001.png', 'plan.assets/Texture2D/portal_05_front_001.png'] },
-      { key: 'portal_back_ship', src: ['assets/images/portals/portal_01_back_001.png', 'plan.assets/Texture2D/portal_01_back_001.png'] },
-      { key: 'portal_back_cube', src: ['assets/images/portals/portal_02_back_001.png', 'plan.assets/Texture2D/portal_02_back_001.png'] },
-      // Orbs / Rings
-      { key: 'orb_yellow', src: ['assets/images/orbs/ring_01_001.png', 'plan.assets/Texture2D/ring_01_001.png'] },
-      { key: 'orb_blue', src: ['assets/images/orbs/ring_02_001.png', 'plan.assets/Texture2D/ring_02_001.png'] },
-      { key: 'orb_green', src: ['assets/images/orbs/ring_03_001.png', 'plan.assets/Texture2D/ring_03_001.png'] },
-      // Ground tiles
-      { key: 'ground_tile', src: ['assets/images/background/ground_tiles/groundSquare_01_001-hd.png', 'plan.assets/Texture2D/groundSquare_01_001-hd.png'] },
-      // Checkpoint
-      { key: 'checkpoint', src: ['assets/images/ui/panels/checkpoint_01_001.png', 'plan.assets/Texture2D/checkpoint_01_001.png'] },
-      { key: 'checkpoint_glow', src: ['assets/images/ui/panels/checkpoint_01_glow_001.png', 'plan.assets/Texture2D/checkpoint_01_glow_001.png'] },
-      // GD UI panels
-      { key: 'ui_newbest', src: ['assets/images/ui/panels/GJ_newBest_001.png', 'plan.assets/Texture2D/GJ_newBest_001.png'] },
-      { key: 'ui_levelcomplete', src: ['assets/images/ui/panels/GJ_levelComplete_001.png', 'plan.assets/Texture2D/GJ_levelComplete_001.png'] },
+      { key: 'spike_01', src: ['assets/images/obstacles/spikes/RegularSpike01.png'] },
+      { key: 'spike_02', src: ['assets/images/obstacles/spikes/RegularSpike02.png'] },
+      { key: 'spike_03', src: ['assets/images/obstacles/spikes/RegularSpike03.png'] },
+      { key: 'spike_04', src: ['assets/images/obstacles/spikes/RegularSpike04.png'] },
+      { key: 'block_01', src: ['assets/images/obstacles/blocks/BrickBlock01.png'] },
+      { key: 'block_02', src: ['assets/images/obstacles/blocks/ChequeredBlock01.png'] },
+      { key: 'block_03', src: ['assets/images/obstacles/blocks/GridBlock01.png'] },
+      { key: 'block_04', src: ['assets/images/obstacles/blocks/RegularBlock01.png'] },
+      { key: 'block_05', src: ['assets/images/obstacles/blocks/TileBlock01.png'] },
+      { key: 'saw_01', src: ['assets/images/obstacles/sawblades/RegularSawblade01.png'] },
+      { key: 'saw_02', src: ['assets/images/obstacles/sawblades/GearSawblade01.png'] },
+      { key: 'portal_front_ship', src: ['assets/images/ui/portals/portal_01_front_001.png'], removeMatte: true },
+      { key: 'portal_front_cube', src: ['assets/images/ui/portals/portal_02_front_001.png'], removeMatte: true },
+      { key: 'portal_front_ball', src: ['assets/images/ui/portals/portal_03_front_001.png'], removeMatte: true },
+      { key: 'portal_front_gravity_down', src: ['assets/images/ui/portals/portal_05_front_001.png'], removeMatte: true },
+      { key: 'portal_front_gravity_up', src: ['assets/images/ui/portals/portal_06_front_001.png'], removeMatte: true },
+      { key: 'portal_back_ship', src: ['assets/images/ui/portals/portal_01_back_001.png'], removeMatte: true },
+      { key: 'portal_back_cube', src: ['assets/images/ui/portals/portal_02_back_001.png'], removeMatte: true },
+      { key: 'portal_back_ball', src: ['assets/images/ui/portals/portal_03_back_001.png'], removeMatte: true },
+      { key: 'portal_back_gravity_down', src: ['assets/images/ui/portals/portal_05_back_001.png'], removeMatte: true },
+      { key: 'portal_back_gravity_up', src: ['assets/images/ui/portals/portal_06_back_001.png'], removeMatte: true },
+      { key: 'orb_yellow', src: ['assets/images/orbs/ring_01_001.png'] },
+      { key: 'orb_blue', src: ['assets/images/orbs/ring_02_001.png'] },
+      { key: 'orb_green', src: ['assets/images/orbs/ring_03_001.png'] },
+      { key: 'orb_red', src: ['assets/images/orbs/gravJumpRing_01_001.png'] },
+      { key: 'ground_tile', src: ['assets/images/background/ground_tiles/groundSquare_01_001-hd.png'] },
+      { key: 'checkpoint', src: ['assets/images/ui/panels/checkpoint_01_001.png'] },
+      { key: 'ui_newbest', src: ['assets/images/ui/panels/GJ_newBest_001.png'] },
     ];
 
     const allItems = [...coreList, ...obstacleList];
     let loaded = 0;
     const total = allItems.length;
 
-    const promises = allItems.map((item) => {
-      return loadImageWithFallback(item.src).then((img) => {
-        if (img) {
-          this.images.set(item.key, img);
-          if (item.key === 'logo') this.logo = img;
-        } else {
-          console.warn(`[AssetLoader] All paths failed for "${item.key}"`);
+    const batchSize = 5;
+    for (let i = 0; i < allItems.length; i += batchSize) {
+      const batch = allItems.slice(i, i + batchSize);
+      await Promise.all(batch.map(async (item) => {
+        try {
+          const img = await loadImageWithFallback(item.src);
+          if (img) {
+            const finalImg = item.removeMatte ? removeNeutralMatte(img) : img;
+            this.images.set(item.key, finalImg);
+            if (item.key === 'logo') this.logo = finalImg;
+          } else {
+            console.warn(`[AssetLoader] All paths failed for "${item.key}"`);
+          }
+        } catch (e) {
+          console.error(`[AssetLoader] Critical error loading "${item.key}":`, e);
+        } finally {
+          loaded++;
+          onProgress(loaded / total);
         }
-        loaded++;
-        onProgress(loaded / total);
-      });
-    });
-
-    await Promise.all(promises);
-
-    this.sprites.set('boss', this.images.get('boss') || null);
-    console.log(`[AssetLoader] Loaded ${this.images.size}/${total} assets.`);
+      }));
+    }
   }
 
-  /** Get a loaded image by key, or null */
   get(key) {
     return this.images.get(key) || null;
   }
 
   drawSprite(ctx, key, x, y, w, h) {
-    const img = this.images.get(key) || this.sprites.get(key);
+    const img = this.images.get(key);
     if (img) {
       ctx.drawImage(img, x, y, w, h);
     } else {
@@ -110,15 +208,13 @@ export class AssetLoader {
     }
   }
 
-  /** Pick a random spike sprite key that is loaded */
   getRandomSpikeKey() {
-    const keys = ['spike_01', 'spike_02', 'spike_03'].filter(k => this.images.has(k));
+    const keys = ['spike_01', 'spike_02', 'spike_03', 'spike_04'].filter(k => this.images.has(k));
     return keys.length > 0 ? keys[Math.floor(Math.random() * keys.length)] : null;
   }
 
-  /** Pick a random block sprite key that is loaded */
   getRandomBlockKey() {
-    const keys = ['block_01', 'block_02', 'block_03'].filter(k => this.images.has(k));
+    const keys = ['block_01', 'block_02', 'block_03', 'block_04', 'block_05'].filter(k => this.images.has(k));
     return keys.length > 0 ? keys[Math.floor(Math.random() * keys.length)] : null;
   }
 
@@ -134,56 +230,47 @@ export class AssetLoader {
     if (player.gravity === -1) ctx.scale(1, -1);
     ctx.rotate(player.rot);
 
-    ctx.shadowColor = player.isInvincible() ? '#ff4444' : theme.primary;
-    ctx.shadowBlur = 8 + beatFlash * 12;
-
     if (player.isInvincible() && Math.floor(performance.now() / 150) % 2 === 0) {
       ctx.globalAlpha = 0.5;
     }
 
-    const playerImg = this.images.get('player_cube');
+    const playerImg = CONFIG.gameplay.useVectorCubeIcon ? null : this.images.get('player_cube');
+    const shipImg = this.images.get('player_ship');
+    const ballImg = this.images.get('player_ball');
 
     if (player.mode === 'cube') {
       if (playerImg) {
-        // Draw player sprite from assets/images/player/characters/player.png
         ctx.drawImage(playerImg, -pSize / 2, -pSize / 2, pSize, pSize);
       } else {
-        // Fallback procedural cube
-        ctx.fillStyle = theme.accent;
-        ctx.fillRect(-pSize / 2, -pSize / 2, pSize, pSize);
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = '#fff';
-        ctx.strokeRect(-pSize / 2, -pSize / 2, pSize, pSize);
-        ctx.fillStyle = '#fff';
-        ctx.fillRect(-pSize / 4, -pSize / 4, pSize / 2, pSize / 2);
+        this.drawVectorCube(ctx, pSize, theme, beatFlash);
       }
     } else if (player.mode === 'ship') {
-      // Ship mode — keep procedural for now (ship sprite TBD)
-      ctx.fillStyle = theme.primary;
-      ctx.beginPath();
-      ctx.moveTo(-pSize / 2, -pSize / 4);
-      ctx.lineTo(pSize / 2, 0);
-      ctx.lineTo(-pSize / 2, pSize / 4);
-      ctx.closePath();
-      ctx.fill();
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = '#fff';
-      ctx.stroke();
+      if (shipImg) {
+        ctx.drawImage(shipImg, -pSize / 2, -pSize / 2, pSize, pSize);
+      } else {
+        ctx.fillStyle = theme.primary;
+        ctx.beginPath();
+        ctx.moveTo(-pSize / 2, -pSize / 4);
+        ctx.lineTo(pSize / 2, 0);
+        ctx.lineTo(-pSize / 2, pSize / 4);
+        ctx.closePath();
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = '#fff';
+        ctx.stroke();
+      }
     } else if (player.mode === 'ball') {
-      // Ball mode — keep procedural for now (ball sprite TBD)
-      ctx.fillStyle = theme.accent;
-      ctx.beginPath();
-      ctx.arc(0, 0, pSize / 2, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = '#fff';
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(-pSize / 4, 0);
-      ctx.lineTo(pSize / 4, 0);
-      ctx.moveTo(0, -pSize / 4);
-      ctx.lineTo(0, pSize / 4);
-      ctx.stroke();
+      if (ballImg) {
+        ctx.drawImage(ballImg, -pSize / 2, -pSize / 2, pSize, pSize);
+      } else {
+        ctx.fillStyle = theme.accent;
+        ctx.beginPath();
+        ctx.arc(0, 0, pSize / 2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = '#fff';
+        ctx.stroke();
+      }
     }
 
     if (player.isInvincible()) {
@@ -193,6 +280,31 @@ export class AssetLoader {
     }
 
     ctx.restore();
+  }
+
+  drawVectorCube(ctx, pSize, theme, beatFlash) {
+    const half = pSize / 2;
+    ctx.fillStyle = theme.primary;
+    ctx.fillRect(-half, -half, pSize, pSize);
+    ctx.fillStyle = 'rgba(0,0,0,0.38)';
+    ctx.fillRect(-half + 5, -half + 5, pSize - 10, pSize - 10);
+    
+    // Removed the 'X' (bersilang) lines that were here
+    
+    ctx.fillStyle = theme.accent;
+    ctx.beginPath();
+    ctx.arc(0, 0, pSize * 0.15, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.82)';
+    const dot = half - 8;
+    for (const [dx, dy] of [[-dot, -dot], [dot, -dot], [-dot, dot], [dot, dot]]) {
+      ctx.beginPath();
+      ctx.arc(dx, dy, 2.4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.strokeStyle = 'rgba(255,255,255,0.72)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(-half, -half, pSize, pSize);
   }
 }
 
@@ -230,7 +342,13 @@ export function createStars() {
 export function createShapes() {
   const arr = [];
   for (let i = 0; i < 4; i++) {
-    arr.push({ x: Math.random() * CONFIG.W, y: Math.random() * CONFIG.H, size: Math.random() * 40 + 20, sides: randInt(3, 6), rot: Math.random() * Math.PI, rs: (Math.random() - 0.5) * 0.05, speed: Math.random() * 2 + 1 });
+    arr.push({
+      x: Math.random() * CONFIG.W,
+      y: 42 + Math.random() * (CONFIG.GROUND_Y * 0.42),
+      size: Math.random() * 22 + 26,
+      speed: Math.random() * 0.7 + 0.35,
+      phase: Math.random() * Math.PI * 2,
+    });
   }
   return arr;
 }

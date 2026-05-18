@@ -23,26 +23,61 @@ export class Player {
     this.coyote = CONFIG.player.coyoteFrames;
     this.invincible = 0;
     this.trail = [];
+    this.bullets = [];
+    this.bulletTimer = 0;
   }
 
-  update(isJumpHeld, solidFloorY = CONFIG.GROUND_Y, solidCeilingY = 0) {
+  fireBullet(targetX, targetY) {
+    const angle = Math.atan2(targetY - (this.y + this.size/2), targetX - (this.x + this.size));
+    this.bullets.push({
+      x: this.x + this.size,
+      y: this.y + this.size / 2,
+      vx: Math.cos(angle) * 14,
+      vy: Math.sin(angle) * 14,
+      life: 1.0,
+      size: 8
+    });
+  }
+
+  update(isJumpHeld, solidFloorY = CONFIG.GROUND_Y, solidCeilingY = 0, dt = 1, options = {}) {
+    const { targetBossX, targetBossY, autoFire = false } = options;
+
+    if (autoFire && this.mode === 'ship') {
+      this.bulletTimer += dt;
+      if (this.bulletTimer >= 12) { // Fire every ~0.2s
+        this.fireBullet(targetBossX || CONFIG.W, targetBossY || CONFIG.H / 2);
+        this.bulletTimer = 0;
+      }
+    }
+
+    for (const b of this.bullets) {
+      b.x += b.vx * dt;
+      b.y += b.vy * dt;
+      b.life -= 0.01 * dt;
+    }
+    this.bullets = this.bullets.filter(b => b.life > 0 && b.x < CONFIG.W + 50);
+
     this.wasOnGround = this.onGround || this.onCeiling;
     this.justLanded = false;
 
     const gravForce = CONFIG.player.gravity * this.gravity;
 
     if (this.mode === 'ship') {
-      const shipAccel = 0.95; // ditingkatkan agar lebih responsif naik
-      const shipMaxSpeed = 10.0;
+      const shipAccel = 0.32; // Lebih kalem (sebelumnya 0.38)
+      const shipMaxSpeed = 6.8; // Lebih terkendali (sebelumnya 7.5)
+      const shipFriction = 0.985; // Menghindari nempel di ujung
+
       if (isJumpHeld) {
         this.vy -= shipAccel * this.gravity;
       } else {
-        this.vy += gravForce * 1.15; // dikurangi agar jatuhnya lebih mulus dan tidak terlalu berat
+        this.vy += gravForce * 0.55; // Lebih melayang (sebelumnya 0.65)
       }
+      
+      this.vy *= shipFriction; // Tambah hambatan udara
       this.vy = Math.min(shipMaxSpeed, Math.max(-shipMaxSpeed, this.vy));
       
-      const targetRot = clamp(Math.atan2(this.vy, 9), -0.6, 0.6);
-      this.rot += (targetRot - this.rot) * 0.18;
+      const targetRot = clamp(Math.atan2(this.vy, 11), -0.4, 0.4);
+      this.rot += (targetRot - this.rot) * 0.1;
     } else {
       this.vy += gravForce;
     }
@@ -58,19 +93,18 @@ export class Player {
       this.coyote = CONFIG.player.coyoteFrames;
       this.justLanded = !this.wasOnGround;
     } 
-    // Ceiling collision — hanya nempel jika gravitasi terbalik
+    // Ceiling collision
     else if (this.y <= solidCeilingY) {
       this.y = solidCeilingY;
       if (this.gravity === -1) {
-        // Gravitasi terbalik: langit-langit jadi lantai
         this.vy = 0;
         this.onCeiling = true;
         this.onGround = false;
         this.coyote = CONFIG.player.coyoteFrames;
         this.justLanded = !this.wasOnGround;
       } else {
-        // Gravitasi normal: mantul balik ke bawah
-        this.vy = Math.abs(this.vy) * 0.3; // pantul lemah ke bawah
+        // Kapal kalau kena langit-langit nggak mantul kenceng, langsung lepas pelan
+        this.vy = this.mode === 'ship' ? 0.3 : Math.abs(this.vy) * 0.15; 
         this.onCeiling = false;
         this.onGround = false;
       }
@@ -177,12 +211,24 @@ export class Player {
       ctx.translate(item.x + item.sz / 2, item.y + item.sz / 2);
       if (item.gravity === -1) ctx.scale(1, -1);
       ctx.rotate(item.rot);
-      ctx.fillStyle = '#00ff44';
-      ctx.shadowColor = '#00ff44';
-      ctx.shadowBlur = 4;
+      ctx.fillStyle = theme.primary;
       ctx.fillRect(-item.sz / 2, -item.sz / 2, item.sz, item.sz);
       ctx.restore();
     }
     ctx.restore();
+  }
+
+  drawBullets(ctx, theme) {
+    for (const b of this.bullets) {
+      ctx.save();
+      ctx.globalAlpha = b.life;
+      ctx.fillStyle = '#fff';
+      ctx.shadowColor = theme.primary;
+      ctx.shadowBlur = 6;
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.size / 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
   }
 }

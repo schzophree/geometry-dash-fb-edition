@@ -221,19 +221,23 @@ python -m http.server 8080
 
 _(Update ini setiap kali fitur baru selesai diimplementasi)_
 
-| Versi / Sesi | Fitur Ditambahkan                  |
-| ------------ | ---------------------------------- |
-| v0.1         | Setup dasar Canvas + player lompat |
-| v0.2         | HUD progress bar + tombol pause    |
-| v0.3         | Death system + motivasi ngauwor    |
-| v0.4         | Sistem nyawa 5 + BGM Web Audio API |
-| ...          | _(sambung di sini)_                |
+| Versi / Sesi | Fitur Ditambahkan                                                                                               |
+| ------------ | ---------------------------------------------------------------------------------------------------------------- |
+| v0.1         | Setup dasar Canvas + player lompat                                                                              |
+| v0.2         | HUD progress bar + tombol pause                                                                                  |
+| v0.3         | Death system + motivasi ngauwor                                                                                  |
+| v0.4         | Sistem nyawa 5 + BGM Web Audio API                                                                              |
+| v1.0         | Mode Ship/Ball (Sprite asli), Variasi Obstacle, Secret Coins, Dekorasi Background, Sistem Nyawa 10               |
+| v1.1         | CyberDemon Boss State Machine (Monster Motion), Sinkronisasi Laser PNG Sequence, Meme Overlay                    |
+| v1.2         | Hidden Cheat "moonchi" (God Mode), Optimasi Performa (Anti-Lag), Layar Kemenangan Spesial, Fitur Menembak Pesawat |
 
 ---
 
 ## 💬 Catatan Tambahan dari Developer
 
-- Proyek ini **bisa berkembang** — fitur baru dicatat di tabel Changelog dan bagian Fitur di atas
-- Gaya bahasa boleh santai/gaul dalam komentar kode (sesuai vibes proyek)
-- Motivasi ngauwor: bertema tentang scroll fesnuk mulu tapi nggak produktif,makin banyak makin lucu, tambah terus di array quotes
+- **Monster Motion**: Animasi boss terbagi jadi 4 state (Idle Utama 0-7, Rage 8-15, Attack 18-23, Idle 2 24-31).
+- **Combat**: Di level Boss, player dalam mode Ship otomatis menembak ke arah boss (Auto-Aim).
+- **Victory**: Menamatkan boss memicu ledakan partikel masif + statistik kematian & skor akhir.
+- **Fair Play**: Laser boss nge-lock posisi 0.3s sebelum nembak, memberikan celah untuk menghindar.
+- **Optimasi**: Shadow blur dan efek berat dihapus agar lancar di laptop spek rendah.
 - Asset sprite dari `plan.assets/Texture2D/` — cek dulu sebelum buat grafis baru

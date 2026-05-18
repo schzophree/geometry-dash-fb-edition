@@ -53,6 +53,10 @@ export const VisualEffects = (() => {
       this.shake(8, 0.3);
     },
 
+    triggerInvert(duration = 0.5) {
+      invertTime = duration;
+    },
+
     update(dt) {
       if (screenShakeTime > 0) {
         screenShakeTime -= dt;
@@ -100,20 +104,10 @@ export const VisualEffects = (() => {
         ctx.restore();
       }
 
-      // 2. Chromatic Aberration Simulation (Cyan/Red borders)
-      if (aberrationOffset > 1) {
-        ctx.save();
-        ctx.globalCompositeOperation = 'screen';
-        ctx.globalAlpha = 0.3;
-        ctx.fillStyle = '#ff0000';
-        ctx.fillRect(-aberrationOffset, 0, w, h);
-        ctx.fillStyle = '#00ffff';
-        ctx.fillRect(aberrationOffset, 0, w, h);
-        ctx.restore();
-      }
+      // 2. Chromatic Aberration - REMOVED for performance
 
       // 3. Invert Glitch
-      if (invertTime > 0 || (dropModeActive && Math.random() < 0.05)) {
+      if (invertTime > 0) {
         ctx.save();
         ctx.globalCompositeOperation = 'difference';
         ctx.fillStyle = 'white';
@@ -123,17 +117,18 @@ export const VisualEffects = (() => {
 
       // 4. Level Specific Overlays
       if (isBoss) {
-        const intensity = Math.min(1, bossBurstIntensity + (facebookDistance < 200 ? 0.4 : 0.1));
-        const vignette = ctx.createRadialGradient(w/2, h/2, 0, w/2, h/2, w);
-        vignette.addColorStop(0, 'rgba(0,0,0,0)');
-        vignette.addColorStop(1, `rgba(255, 0, 61, ${intensity * 0.5 + beatPulseIntensity * 0.3})`);
-        ctx.fillStyle = vignette;
+        const intensity = Math.min(0.6, bossBurstIntensity + (facebookDistance < 200 ? 0.3 : 0));
+        ctx.save();
+        ctx.globalAlpha = intensity * 0.4 + beatPulseIntensity * 0.2;
+        ctx.fillStyle = '#ff003d';
+        ctx.globalCompositeOperation = 'screen';
         ctx.fillRect(0, 0, w, h);
+        ctx.restore();
 
         if (facebookDistance < 150) {
-          ctx.fillStyle = `rgba(255, 0, 0, ${warningFlashAlpha * 0.5})`;
-          ctx.fillRect(0, 0, w, 50);
-          ctx.fillRect(0, h-50, w, 50);
+          ctx.fillStyle = `rgba(255, 0, 0, ${warningFlashAlpha * 0.4})`;
+          ctx.fillRect(0, 0, w, 40);
+          ctx.fillRect(0, h-40, w, 40);
         }
       }
     },

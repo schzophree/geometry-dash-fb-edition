@@ -1,236 +1,320 @@
-export const LEVEL1_MAPPING = [
-  // ═══ 0-10% INTRO — Familiarization ═══
-  { time: 1.0, type: 'spike' },
-  { time: 2.0, type: 'spike' },
-  { time: 3.0, type: 'trampoline' },
-  { time: 4.5, type: 'block' },
-  { time: 5.5, type: 'spike_double' },
-  { time: 7.0, type: 'triangle_step' },
-  { time: 8.5, type: 'block' },
+// Deterministic obstacle choreography.
+// every gameplay lane below is generated on a 0.6 second grid so the level never
+// has empty surprise gaps. Difficulty is stored as 1..100 for tuning/debugging.
 
-  // ═══ 10-25% — Block Patterns ═══
-  { time: 10.0, type: 'block_tower_3' },
-  { time: 11.5, type: 'spike_triple' },
-  { time: 13.0, type: 'block_gap' },
-  { time: 14.5, type: 'trampoline' },
-  { time: 15.5, type: 'spike_double' },
-  { time: 17.0, type: 'triangle_staircase' },
-  { time: 18.5, type: 'block' },
-  { time: 19.5, type: 'spike' },
+const STEP = 0.6; // Increased from 0.5 to reduce crowding across all levels
+const LEVEL1_END = 92.0; // Adjusted for new step
+const LEVEL2_END = 90.0; // Adjusted for new step
+const BOSS_END = 180.0;
+const CEILING_RETURN_Y = 44;
+const CEILING_RETURN_LANES = [36, 48, 62];
 
-  // ═══ 25-40% — Mixed Challenges ═══
-  { time: 21.0, type: 'platform_jump_orb' },
-  { time: 22.5, type: 'spike_pit' },
-  { time: 24.0, type: 'block_double' },
-  { time: 25.5, type: 'trampoline' },
-  { time: 26.5, type: 'triangle_double' },
-  { time: 28.0, type: 'spike_triple' },
-  { time: 29.5, type: 'block_alternating' },
-  { time: 31.0, type: 'triangle_step' },
-  { time: 32.5, type: 'spike_double' },
+function t(value) {
+  return Number(value.toFixed(2));
+}
 
-  // ═══ 40-55% — Difficulty Spike ═══
-  { time: 34.0, type: 'PORTAL_SHIP' },
-  { time: 35.5, type: 'tunnel_blocks' },
-  { time: 37.0, type: 'spike_triple' },
-  { time: 38.5, type: 'block_tower_2' },
-  { time: 40.0, type: 'trampoline' },
-  { time: 41.5, type: 'triangle_maze' },
-  { time: 43.0, type: 'spike_pit' },
-  { time: 44.5, type: 'PORTAL_CUBE' },
+function add(list, time, type, data = {}) {
+  list.push({ time: t(time), type, ...data });
+}
 
-  // ═══ 55-70% — Gravity Shift ═══
-  { time: 46.0, type: 'PORTAL_GRAVITY_UP' },
-  { time: 47.5, type: 'spike_ceiling' },
-  { time: 49.0, type: 'triangle_step' },
-  { time: 50.5, type: 'block_gap' },
-  { time: 52.0, type: 'spike_double' },
-  { time: 53.5, type: 'trampoline' },
-  { time: 55.0, type: 'PORTAL_GRAVITY_DOWN' },
-  { time: 56.5, type: 'block_tower_3' },
+function seeded01(seed) {
+  let value = seed >>> 0;
+  value = (Math.imul(value, 1664525) + 1013904223) >>> 0;
+  return value / 0x100000000;
+}
 
-  // ═══ 70-85% — Intense Combinations ═══
-  { time: 58.0, type: 'spike_pit' },
-  { time: 59.5, type: 'triangle_staircase' },
-  { time: 61.0, type: 'block_alternating' },
-  { time: 62.5, type: 'spike_triple' },
-  { time: 64.0, type: 'trampoline' },
-  { time: 65.5, type: 'spike_ceiling_double' },
-  { time: 67.0, type: 'block_double' },
-  { time: 68.5, type: 'triangle_maze' },
+function difficultyAt(time, start, end) {
+  const p = Math.max(0, Math.min(1, (time - start) / Math.max(1, end - start)));
+  return Math.max(1, Math.min(100, Math.round(1 + p * 99)));
+}
 
-  // ═══ 85-100% — Final Climax ═══
-  { time: 70.0, type: 'spike_pit_long' },
-  { time: 71.5, type: 'trampoline_double' },
-  { time: 73.0, type: 'block_tower_4' },
-  { time: 74.5, type: 'spike_triple' },
-  { time: 76.0, type: 'triangle_staircase' },
-  { time: 77.5, type: 'platform_jump_orb' },
-  { time: 79.0, type: 'spike_pit' },
-  { time: 80.5, type: 'trampoline' },
-  { time: 82.0, type: 'block_gap' },
-  { time: 83.5, type: 'spike_ceiling' },
-  { time: 85.0, type: 'triangle_step' },
-  { time: 86.5, type: 'spike_double' },
-];
+function everyHalfSecond(start, end, onTick) {
+  for (let time = start; time <= end; time += STEP) {
+    onTick(t(time), Math.round((time - start) / STEP));
+  }
+}
 
-export const LEVEL2_MAPPING = [
-  // ═══ 0-10% Gravity Swap Intro ═══
-  { time: 4.0, type: 'PORTAL_GRAVITY_UP' },
-  { time: 5.5, type: 'spike_ceiling_triple' },
-  { time: 7.0, type: 'PORTAL_GRAVITY_DOWN' },
-  { time: 8.5, type: 'block_tower_2' },
-  { time: 10.0, type: 'triangle_step' },
-  { time: 11.5, type: 'spike_double' },
+function levelOnePattern(time, tick, difficulty) {
+  if (difficulty < 12) {
+    return tick % 2 === 0
+      ? ['gd_spike_run', { count: 1, gap: 84 }]
+      : ['gd_stack', { height: 1 }];
+  }
+  if (difficulty < 24) {
+    const patterns = [
+      ['gd_spike_run', { count: 2, gap: 82 }],
+      ['gd_slope_chain', { pattern: 'up', length: 2 }],
+      ['gd_stack', { height: 2 }],
+      ['gd_spike_block_mix', { pattern: 'single', intensity: 1 }],
+    ];
+    return patterns[tick % patterns.length];
+  }
+  if (difficulty < 38) {
+    const patterns = [
+      ['gd_steps', { heights: [1, 2, 1] }],
+      ['gd_spike_block_mix', { pattern: 'stairs', intensity: 2 }],
+      ['gd_platform', { width: 3, height: 1 }],
+      ['gd_ceiling_spikes', { count: 1, drop: 0, gap: 82 }],
+    ];
+    return patterns[tick % patterns.length];
+  }
+  if (difficulty < 54) {
+    const patterns = [
+      ['gd_tunnel', { width: 3, floor: 1, ceiling: 1 }],
+      ['gd_slope_chain', { pattern: 'zigzag', length: 3 }],
+      ['gd_spike_run', { count: 3, gap: 78 }],
+      ['gd_pillar_gap', { floor: 2, ceiling: 1 }],
+    ];
+    return patterns[tick % patterns.length];
+  }
+  if (difficulty < 72) {
+    const patterns = [
+      ['gd_spike_block_mix', { pattern: 'teeth', intensity: 2 }],
+      ['gd_steps', { heights: [1, 2, 3, 1] }],
+      ['gd_ceiling_steps', { heights: [1, 2] }],
+      ['gd_tunnel', { width: 4, floor: 2, ceiling: 1 }],
+    ];
+    return patterns[tick % patterns.length];
+  }
+  if (difficulty < 88) {
+    const patterns = [
+      ['gd_mirror_gate', { floor: 2, ceiling: 2, spikes: 1 }],
+      ['gd_spike_block_mix', { pattern: 'ceiling', intensity: 3 }],
+      ['gd_slope_chain', { pattern: 'zigzag', length: 4 }],
+      ['gd_pillar_gap', { floor: 3, ceiling: 2 }],
+    ];
+    return patterns[tick % patterns.length];
+  }
+  const patterns = [
+    ['gd_mirror_gate', { floor: 3, ceiling: 2, spikes: 2 }],
+    ['gd_spike_block_mix', { pattern: 'teeth', intensity: 3 }],
+    ['gd_tunnel', { width: 5, floor: 2, ceiling: 2 }],
+    ['gd_steps', { heights: [1, 2, 3, 2] }],
+  ];
+  return patterns[tick % patterns.length];
+}
 
-  // ═══ 10-25% — Asymmetric Challenges ═══
-  { time: 13.0, type: 'block_offset' },
-  { time: 14.5, type: 'spike_triple' },
-  { time: 16.0, type: 'tunnel_blocks_narrow' },
-  { time: 17.5, type: 'triangle_maze' },
-  { time: 19.0, type: 'trampoline' },
-  { time: 20.5, type: 'PORTAL_GRAVITY_UP' },
-  { time: 22.0, type: 'spike_ceiling' },
-  { time: 23.5, type: 'block_double_offset' },
-  { time: 25.0, type: 'PORTAL_GRAVITY_DOWN' },
+function levelTwoPattern(time, tick, difficulty) {
+  if (difficulty < 12) {
+    const patterns = [
+      ['gd_spike_run', { count: 2, gap: 78 }],
+      ['gd_stack', { height: 2 }],
+      ['gd_slope_chain', { pattern: 'up', length: 2 }],
+    ];
+    return patterns[tick % patterns.length];
+  }
+  if (difficulty < 28) {
+    const patterns = [
+      ['gd_semi_pair', { floorSpikes: 1, ceilingBlocks: 1 }],
+      ['gd_spike_block_mix', { pattern: 'stairs', intensity: 2 }],
+      ['gd_ceiling_spikes', { count: 2, drop: 4, gap: 76 }],
+      ['gd_tunnel', { width: 3, floor: 2, ceiling: 1 }],
+    ];
+    return patterns[tick % patterns.length];
+  }
+  if (difficulty < 46) {
+    const patterns = [
+      ['gd_mirror_gate', { floor: 1, ceiling: 2, spikes: 1 }],
+      ['gd_steps', { heights: [2, 3, 1] }],
+      ['gd_spike_block_mix', { pattern: 'teeth', intensity: 3 }],
+      ['gd_pillar_gap', { floor: 2, ceiling: 2 }],
+    ];
+    return patterns[tick % patterns.length];
+  }
+  if (difficulty < 64) {
+    const patterns = [
+      ['gd_tunnel', { width: 4, floor: 2, ceiling: 2 }],
+      ['gd_slope_chain', { pattern: 'zigzag', length: 4 }],
+      ['gd_semi_pair', { floorBlocks: 2, ceilingSpikes: 3 }],
+      ['gd_spike_run', { count: 4, gap: 74 }],
+    ];
+    return patterns[tick % patterns.length];
+  }
+  if (difficulty < 82) {
+    const patterns = [
+      ['gd_mirror_gate', { floor: 2, ceiling: 3, spikes: 2 }],
+      ['gd_spike_block_mix', { pattern: 'ceiling', intensity: 4 }],
+      ['gd_ceiling_steps', { heights: [2, 3, 2] }],
+      ['gd_tunnel', { width: 5, floor: 3, ceiling: 2 }],
+    ];
+    return patterns[tick % patterns.length];
+  }
+  const patterns = [
+    ['gd_mirror_gate', { floor: 3, ceiling: 3, spikes: 2 }],
+    ['gd_spike_block_mix', { pattern: 'teeth', intensity: 4 }],
+    ['gd_slope_chain', { pattern: 'zigzag', length: 5 }],
+    ['gd_pillar_gap', { floor: 3, ceiling: 3 }],
+  ];
+  return patterns[tick % patterns.length];
+}
 
-  // ═══ 25-40% — Ball Mode Transition ═══
-  { time: 26.5, type: 'PORTAL_BALL' },
-  { time: 28.0, type: 'tunnel_curve' },
-  { time: 29.5, type: 'spike_pit' },
-  { time: 31.0, type: 'triangle_staircase' },
-  { time: 32.5, type: 'block_tower_3' },
-  { time: 34.0, type: 'trampoline_double' },
-  { time: 35.5, type: 'spike_ceiling_double' },
-  { time: 37.0, type: 'PORTAL_CUBE' },
+function bossPattern(time, tick, difficulty) {
+  if (difficulty < 16) {
+    const patterns = [
+      ['gd_ship_corridor', { variant: tick % 3 }],
+      ['gd_boss_lane', { pattern: 'fangs' }],
+      ['gd_mirror_gate', { floor: 1, ceiling: 1, spikes: 1 }],
+    ];
+    return patterns[tick % patterns.length];
+  }
+  if (difficulty < 36) {
+    const patterns = [
+      ['gd_ship_corridor', { variant: tick % 3 }],
+      ['gd_boss_lane', { pattern: tick % 2 ? 'gate' : 'fangs' }],
+      ['gd_spike_block_mix', { pattern: 'ceiling', intensity: 3 }],
+      ['gd_mirror_gate', { floor: 2, ceiling: 2, spikes: 1 }],
+    ];
+    return patterns[tick % patterns.length];
+  }
+  if (difficulty < 58) {
+    const patterns = [
+      ['gd_boss_lane', { pattern: 'steps' }],
+      ['gd_tunnel', { width: 4, floor: 2, ceiling: 2 }],
+      ['gd_mirror_gate', { floor: 2, ceiling: 3, spikes: 2 }],
+      ['gd_spike_block_mix', { pattern: 'teeth', intensity: 3 }],
+    ];
+    return patterns[tick % patterns.length];
+  }
+  if (difficulty < 80) {
+    const patterns = [
+      ['gd_mirror_gate', { floor: 3, ceiling: 3, spikes: 2 }],
+      ['gd_ship_corridor', { variant: 2 }],
+      ['gd_spike_block_mix', { pattern: 'ceiling', intensity: 4 }],
+      ['gd_tunnel', { width: 5, floor: 3, ceiling: 2 }],
+    ];
+    return patterns[tick % patterns.length];
+  }
+  const patterns = [
+    ['gd_mirror_gate', { floor: 3, ceiling: 3, spikes: 3 }],
+    ['gd_spike_block_mix', { pattern: 'teeth', intensity: 4 }],
+    ['gd_boss_lane', { pattern: tick % 2 ? 'gate' : 'steps' }],
+    ['gd_tunnel', { width: 6, floor: 3, ceiling: 3 }],
+  ];
+  return patterns[tick % patterns.length];
+}
 
-  // ═══ 40-55% — Complex Mazes ═══
-  { time: 38.5, type: 'PORTAL_GRAVITY_UP' },
-  { time: 40.0, type: 'block_gap_offset' },
-  { time: 41.5, type: 'spike_pit_offset' },
-  { time: 43.0, type: 'PORTAL_GRAVITY_DOWN' },
-  { time: 44.5, type: 'triangle_maze_complex' },
-  { time: 46.0, type: 'block_tower_4' },
-  { time: 47.5, type: 'spike_triple_offset' },
-  { time: 49.0, type: 'trampoline' },
+function addOrbBeats(list, start, end, lanes, allowedOrbs = ['orb_yellow', 'orb_blue', 'orb_green', 'orb_red']) {
+  let n = 0;
+  for (let time = start; time <= end; time += 4) {
+    add(list, time, 'gd_orb_line', {
+      orb: allowedOrbs[n % allowedOrbs.length],
+      lane: lanes[n % lanes.length],
+      count: n % 3 === 2 ? 2 : 1,
+      difficulty: difficultyAt(time, start, end),
+    });
+    n++;
+  }
+}
 
-  // ═══ 55-70% — Ship ZigZag Pattern ═══
-  { time: 50.5, type: 'PORTAL_SHIP' },
-  { time: 52.0, type: 'tunnel_zigzag' },
-  { time: 53.5, type: 'block_alternating_offset' },
-  { time: 55.0, type: 'spike_ceiling_triple' },
-  { time: 56.5, type: 'triangle_step' },
-  { time: 58.0, type: 'trampoline_double' },
-  { time: 59.5, type: 'spike_pit' },
-  { time: 61.0, type: 'PORTAL_CUBE' },
+function addCeilingReturnNet(list, start, end, interval, seedBase) {
+  let n = 0;
+  for (let time = start; time <= end; time += interval) {
+    const seed = seedBase + n * 97;
+    const lane = CEILING_RETURN_LANES[Math.floor(seeded01(seed) * CEILING_RETURN_LANES.length)];
+    const jitter = Math.round(seeded01(seed + 37) * 4) * 0.25;
+    add(list, time + jitter, 'PORTAL_GRAVITY_DOWN', {
+      y: lane,
+      difficulty: difficultyAt(time, start, end),
+      safetyReturn: true,
+    });
+    n++;
+  }
+}
 
-  // ═══ 70-85% — Gravity Chaos ═══
-  { time: 62.5, type: 'PORTAL_GRAVITY_UP' },
-  { time: 64.0, type: 'block_offset_complex' },
-  { time: 65.5, type: 'spike_triple' },
-  { time: 67.0, type: 'PORTAL_GRAVITY_DOWN' },
-  { time: 68.5, type: 'tunnel_blocks_tight' },
-  { time: 70.0, type: 'triangle_maze' },
-  { time: 71.5, type: 'PORTAL_GRAVITY_UP' },
-  { time: 73.0, type: 'spike_ceiling_double' },
+function buildLevelOne() {
+  const list = [];
+  const start = 2.5;
+  const end = LEVEL1_END - 1.5;
+  everyHalfSecond(start, end, (time, tick) => {
+    const difficulty = difficultyAt(time, start, end);
+    const [type, data] = levelOnePattern(time, tick, difficulty);
+    add(list, time, type, { ...data, difficulty });
+  });
 
-  // ═══ 85-100% — Brutal Final Section ═══
-  { time: 74.5, type: 'PORTAL_GRAVITY_DOWN' },
-  { time: 76.0, type: 'block_tower_4' },
-  { time: 77.5, type: 'spike_pit_long' },
-  { time: 79.0, type: 'trampoline_double' },
-  { time: 80.5, type: 'triangle_staircase_offset' },
-  { time: 82.0, type: 'PORTAL_GRAVITY_UP' },
-  { time: 83.5, type: 'spike_ceiling_triple' },
-  { time: 85.0, type: 'block_gap_complex' },
-  { time: 86.5, type: 'PORTAL_GRAVITY_DOWN' },
-  { time: 88.0, type: 'spike_pit' },
-  { time: 89.5, type: 'platform_jump_orb' },
-];
+  addOrbBeats(list, 7.0, 78.0, ['mid', 'high', 'low']);
+  add(list, 12.0, 'gd_secret_coin', { y: 260, difficulty: 14 });
+  add(list, 22.5, 'PORTAL_GRAVITY_UP', { difficulty: 25 });
+  add(list, 27.0, 'PORTAL_GRAVITY_DOWN', { y: CEILING_RETURN_Y, difficulty: 31 });
+  add(list, 31.0, 'PORTAL_GRAVITY_DOWN', { y: CEILING_RETURN_Y, difficulty: 36 });
+  add(list, 58.5, 'PORTAL_GRAVITY_UP', { difficulty: 70 });
+  add(list, 63.0, 'PORTAL_GRAVITY_DOWN', { y: CEILING_RETURN_Y, difficulty: 76 });
+  addCeilingReturnNet(list, 24.5, 34.5, 2.5, 101);
+  addCeilingReturnNet(list, 60.5, 68.0, 2.5, 151);
+  add(list, 52.0, 'gd_secret_coin', { y: 170, difficulty: 63 });
+  add(list, LEVEL1_END, 'gd_finish_lane', { difficulty: 100 });
+  return list.sort((a, b) => a.time - b.time);
+}
 
-const CORE_BOSS_MAPPING = [
-  // ═══ 0-10% — Boss Intro ═══
-  { time: 4.2, type: 'BOSS_APPEAR', text: 'RAJA FESNUK' },
-  { time: 6.0, type: 'PORTAL_SHIP' },
-  { time: 8.0, type: 'tunnel_spike_walls' },
-  { time: 10.0, type: 'block_tower_3' },
-  { time: 12.0, type: 'spike_ceiling_double' },
+function buildLevelTwo() {
+  const list = [];
+  const start = 2.5;
+  const end = LEVEL2_END - 1.5;
+  everyHalfSecond(start, end, (time, tick) => {
+    const difficulty = difficultyAt(time, start, end);
+    const [type, data] = levelTwoPattern(time, tick, difficulty);
+    add(list, time, type, { ...data, difficulty });
+  });
 
-  // ═══ 10-20% — Laser Intro ═══
-  { time: 14.0, type: 'block_offset' },
-  { time: 15.5, type: 'spike_pit' },
-  { time: 17.0, type: 'LASER_WARNING', y: 350 },
-  { time: 18.5, type: 'LASER_FIRE', y: 350, duration: 1.2 },
-  { time: 20.0, type: 'tunnel_dodge' },
-  { time: 21.5, type: 'spike_ceiling_triple' },
+  addOrbBeats(list, 6.5, 77.5, ['mid', 'high', 'ceiling', 'low']);
+  add(list, 14.5, 'PORTAL_GRAVITY_UP', { difficulty: 16 });
+  add(list, 20.0, 'PORTAL_GRAVITY_DOWN', { y: CEILING_RETURN_Y, difficulty: 23 });
+  add(list, 18.0, 'gd_secret_coin', { y: 150, difficulty: 22 });
+  add(list, 34.0, 'PORTAL_GRAVITY_UP', { difficulty: 41 });
+  add(list, 39.5, 'PORTAL_GRAVITY_DOWN', { y: CEILING_RETURN_Y, difficulty: 48 });
+  add(list, 51.5, 'gd_secret_coin', { y: 300, difficulty: 64 });
+  add(list, 56.0, 'PORTAL_GRAVITY_UP', { difficulty: 69 });
+  add(list, 61.0, 'PORTAL_GRAVITY_DOWN', { y: CEILING_RETURN_Y, difficulty: 75 });
+  add(list, 72.0, 'PORTAL_GRAVITY_UP', { difficulty: 89 });
+  add(list, 77.0, 'PORTAL_GRAVITY_DOWN', { y: CEILING_RETURN_Y, difficulty: 95 });
+  addCeilingReturnNet(list, 16.5, 24.0, 2.0, 201);
+  addCeilingReturnNet(list, 36.0, 44.5, 2.0, 251);
+  addCeilingReturnNet(list, 58.0, 66.0, 2.0, 301);
+  addCeilingReturnNet(list, 73.5, 79.0, 1.75, 351);
+  add(list, LEVEL2_END, 'gd_finish_lane', { difficulty: 100 });
+  return list.sort((a, b) => a.time - b.time);
+}
 
-  // ═══ 20-35% — Gravity + Laser ═══
-  { time: 23.0, type: 'PORTAL_GRAVITY_UP' },
-  { time: 24.5, type: 'block_tower_4' },
-  { time: 26.0, type: 'spike_triple' },
-  { time: 27.5, type: 'LASER_WARNING', y: 120 },
-  { time: 29.0, type: 'LASER_FIRE', y: 120, duration: 1.5 },
-  { time: 30.5, type: 'trampoline_double' },
-  { time: 32.0, type: 'PORTAL_GRAVITY_DOWN' },
-  { time: 33.5, type: 'spike_pit_offset' },
-  { time: 35.0, type: 'block_gap_complex' },
+function buildBoss() {
+  const list = [];
+  const start = 2.5;
+  const end = BOSS_END - 2;
+  add(list, 2.5, 'PORTAL_SHIP', { difficulty: 1 });
+  add(list, 3.5, 'BOSS_APPEAR', { text: 'ACOLYTE OF CORRUPTION', difficulty: 2 });
+  add(list, 24.0, 'PORTAL_GRAVITY_UP', { difficulty: 13 });
+  add(list, 29.0, 'PORTAL_GRAVITY_DOWN', { y: CEILING_RETURN_Y, difficulty: 16 });
+  add(list, 62.0, 'PORTAL_GRAVITY_UP', { difficulty: 34 });
+  add(list, 67.0, 'PORTAL_GRAVITY_DOWN', { y: CEILING_RETURN_Y, difficulty: 37 });
+  add(list, 104.0, 'PORTAL_GRAVITY_UP', { difficulty: 58 });
+  add(list, 109.0, 'PORTAL_GRAVITY_DOWN', { y: CEILING_RETURN_Y, difficulty: 61 });
+  add(list, 148.0, 'PORTAL_GRAVITY_UP', { difficulty: 83 });
+  add(list, 153.0, 'PORTAL_GRAVITY_DOWN', { y: CEILING_RETURN_Y, difficulty: 86 });
+  addCeilingReturnNet(list, 26.0, 34.0, 2.0, 401);
+  addCeilingReturnNet(list, 64.0, 73.0, 2.0, 451);
+  addCeilingReturnNet(list, 106.0, 116.0, 2.0, 501);
+  addCeilingReturnNet(list, 150.0, 160.0, 1.75, 551);
 
-  // ═══ 35-50% — Intense Mixed ═══
-  { time: 37.0, type: 'block_tower_5' },
-  { time: 39.0, type: 'LASER_WARNING', y: 250 },
-  { time: 40.5, type: 'LASER_FIRE', y: 250, duration: 1.5 },
-  { time: 42.0, type: 'tunnel_blocks_tight' },
-  { time: 43.5, type: 'triangle_staircase_offset' },
-  { time: 45.0, type: 'spike_ceiling_double' },
-  { time: 46.5, type: 'trampoline' },
-  { time: 48.0, type: 'spike_pit_long' },
+  everyHalfSecond(5.0, end, (time, tick) => {
+    const difficulty = difficultyAt(time, start, end);
+    const [type, data] = bossPattern(time, tick, difficulty);
+    add(list, time, type, { ...data, difficulty });
 
-  // ═══ 50-65% — Vortex Phase ═══
-  { time: 50.0, type: 'MOUTH_VORTEX', duration: 3.5 },
-  { time: 52.0, type: 'LASER_WARNING', y: 350 },
-  { time: 53.5, type: 'LASER_FIRE', y: 350, duration: 1.8 },
-  { time: 55.0, type: 'block_tower_4' },
-  { time: 56.5, type: 'spike_triple' },
-  { time: 58.0, type: 'tunnel_zigzag' },
-  { time: 59.5, type: 'triangle_maze' },
+    if (tick % 14 === 0) add(list, time + 0.05, 'PILLAR_SPAWN', { position: tick % 28 === 0 ? 'top' : 'bottom', difficulty });
+    if (tick % 16 === 8) add(list, time + 0.1, 'LASER_WARNING', { difficulty });
+    if (tick % 16 === 11) add(list, time + 0.1, 'LASER_FIRE', { duration: difficulty > 70 ? 1.3 : 1.0, difficulty });
+  });
 
-  // ═══ 65-80% — Double Laser Chaos ═══
-  { time: 61.0, type: 'LASER_WARNING', y: 120 },
-  { time: 61.5, type: 'LASER_WARNING', y: 350 },
-  { time: 63.0, type: 'LASER_FIRE', y: 120, duration: 1.5 },
-  { time: 63.0, type: 'LASER_FIRE', y: 350, duration: 1.5 },
-  { time: 65.0, type: 'PORTAL_GRAVITY_UP' },
-  { time: 66.5, type: 'spike_pit_offset' },
-  { time: 68.0, type: 'block_gap_complex' },
-  { time: 69.5, type: 'PORTAL_GRAVITY_DOWN' },
-  { time: 71.0, type: 'spike_ceiling_triple' },
+  addOrbBeats(list, 9.0, 172.0, ['mid', 'high', 'low'], ['orb_blue']);
+  add(list, BOSS_END, 'gd_finish_lane', { difficulty: 100 });
+  return list.sort((a, b) => a.time - b.time);
+}
 
-  // ═══ 80-90% — Extreme Mode ═══
-  { time: 72.5, type: 'MOUTH_VORTEX', duration: 4 },
-  { time: 74.5, type: 'LASER_WARNING', y: 250 },
-  { time: 76.0, type: 'LASER_FIRE', y: 250, duration: 2.0 },
-  { time: 78.0, type: 'block_tower_5' },
-  { time: 79.5, type: 'spike_pit_long' },
-  { time: 81.0, type: 'tunnel_blocks_ultra_tight' },
-  { time: 82.5, type: 'triangle_maze_complex' },
-  { time: 84.0, type: 'trampoline_double' },
-
-  // ═══ 90-100% — Final Rage ═══
-  { time: 85.5, type: 'LASER_WARNING', y: 120 },
-  { time: 85.5, type: 'LASER_WARNING', y: 350 },
-  { time: 87.0, type: 'LASER_FIRE', y: 120, duration: 2.0 },
-  { time: 87.0, type: 'LASER_FIRE', y: 350, duration: 2.0 },
-  { time: 89.0, type: 'spike_pit_offset' },
-  { time: 90.5, type: 'MOUTH_VORTEX', duration: 3 },
-  { time: 92.5, type: 'block_tower_5' },
-  { time: 94.0, type: 'spike_triple_offset' },
-];
-
-export const BOSS_MAPPING = [...CORE_BOSS_MAPPING];
+export const LEVEL1_MAPPING = buildLevelOne();
+export const LEVEL2_MAPPING = buildLevelTwo();
+export const BOSS_MAPPING = buildBoss();
 
 export function GET_LEVEL_MAPPING(index) {
-  if (index === 0) return LEVEL1_MAPPING;
-  if (index === 1) return LEVEL2_MAPPING;
-  if (index === 2) return BOSS_MAPPING;
+  if (index === 0) return [...LEVEL1_MAPPING];
+  if (index === 1) return [...LEVEL2_MAPPING];
+  if (index === 2) return [...BOSS_MAPPING];
   return [];
 }

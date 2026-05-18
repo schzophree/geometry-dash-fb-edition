@@ -90,8 +90,8 @@ const Renderer = (() => {
     const offset = (score * 0.42) % 64;
     for (let x = -offset; x < width + 64; x += 64) {
       ctx.beginPath();
-      ctx.moveTo(x, groundY - 12);
-      ctx.lineTo(width / 2 + (x - width / 2) * 0.18, 260);
+      ctx.moveTo(x, groundY);
+      ctx.lineTo(x, 260); // Straight lines instead of perspective
       ctx.stroke();
     }
 
@@ -109,11 +109,9 @@ const Renderer = (() => {
     ctx.fillStyle = accent;
     ctx.fillRect(-20, groundY, width + 40, 5 + pulse * 3);
     
-    // FIX 3D: Visual beat sync - ground glow line
+    // Visual beat sync - ground glow line
     if (pulse > 0.05) {
       ctx.save();
-      ctx.shadowColor = accent;
-      ctx.shadowBlur = Math.max(2, 8 + pulse * 15); // Spike from base to base*2.5
       ctx.strokeStyle = accent;
       ctx.lineWidth = 3 + pulse * 2;
       ctx.beginPath();

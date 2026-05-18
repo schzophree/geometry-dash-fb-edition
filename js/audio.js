@@ -113,11 +113,17 @@ export class AudioEngine {
 
   async loadSfx(name, file) {
     if (!name || !file || !this.ctx) return null;
-    if (this.sfxBuffers.has(name)) return this.sfxBuffers.get(name);
+    if (this.sfxBuffers.get(name)) return this.sfxBuffers.get(name);
 
     try {
       console.log(`[audio] fetching sfx ${file}`);
-      const response = await fetch(file);
+
+      const fetchPromise = fetch(file);
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Audio fetch timeout')), 8000)
+      );
+
+      const response = await Promise.race([fetchPromise, timeoutPromise]);
       if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
       const arrayBuffer = await response.arrayBuffer();
       const decoded = await this.ctx.decodeAudioData(arrayBuffer);

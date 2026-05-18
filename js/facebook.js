@@ -1,4 +1,4 @@
-import { CONFIG } from './config.js';
+import { CONFIG, clamp } from './config.js';
 
 export class FacebookChaser {
   constructor() {
@@ -10,54 +10,40 @@ export class FacebookChaser {
     this.x = CONFIG.facebook.x;
     this.w = CONFIG.facebook.w;
     this.h = CONFIG.facebook.h;
-    this.y = CONFIG.GROUND_Y - this.h;
+    this.y = CONFIG.GROUND_Y - this.h - 18;
     this.vy = 0;
-    this.gravity = 0.85;
-    this.jumpForce = -14.8;
-    this.onGround = true;
     this.wobble = 0;
     this.angry = false;
     this.jumpQueue = [];
-    this.jumpDelayMs = 450; // Delay in milliseconds (approx 0.45s)
   }
 
   update(player, levelSpeed, score, frame) {
-    const now = performance.now();
     const pressure = Math.min(CONFIG.facebook.maxPressure, score * 0.006);
     const targetX = player.x - CONFIG.facebook.targetGap + pressure;
     const chaseSpeed = levelSpeed * 0.36 + score * 0.00035;
     
-    // Horizontal movement
+    // Horizontal movement - smooth pursuit
     this.x += Math.min(chaseSpeed, Math.max(-1.2, targetX - this.x)) * 0.72;
     if (this.x > targetX + 28) this.x += (targetX - this.x) * 0.08;
 
-    // JUMP LOGIC WITH DELAY
-    // 1. Record player jump
-    if (player.vy < -2 && player.onGround === false && (this.jumpQueue.length === 0 || now - this.jumpQueue[this.jumpQueue.length-1].t > 300)) {
-        this.jumpQueue.push({ t: now });
-    }
+    // Vertical movement - smooth levitation yang mengikuti player di mana pun (even at ceiling)
+    let targetY;
+    
+    // Follow player's Y center more closely
+    const playerYCenter = player.y + player.size / 2;
+    targetY = playerYCenter - this.h / 2;
 
-    // 2. Check queue for delayed jump execution
-    if (this.jumpQueue.length > 0 && this.onGround) {
-        if (now - this.jumpQueue[0].t >= this.jumpDelayMs) {
-            this.vy = this.jumpForce;
-            this.onGround = false;
-            this.jumpQueue.shift(); // Remove handled jump
-        }
-    }
+    // Clamp to screen boundaries with some padding
+    targetY = clamp(targetY, 40, CONFIG.GROUND_Y - this.h - 40);
+    
+    // Smooth levitation interpolation - aggressive enough to "ngejar"
+    const distance = Math.abs(targetY - this.y);
+    const interpSpeed = 0.12 + Math.min(0.2, distance * 0.002); 
+    this.y += (targetY - this.y) * interpSpeed;
 
-    // Vertical Physics
-    this.vy += this.gravity;
-    this.y += this.vy;
-
-    // Floor collision
-    if (this.y + this.h >= CONFIG.GROUND_Y) {
-        this.y = CONFIG.GROUND_Y - this.h;
-        this.vy = 0;
-        this.onGround = true;
-    }
-
-    this.wobble = Math.sin(frame * 0.09) * 5;
+    // Breathing/hovering animation - smooth sine wave untuk efek melayang
+    this.wobble = Math.sin(frame * 0.12) * 12;
+    
     this.angry = this.distanceTo(player) < CONFIG.facebook.angryDistance;
   }
 
@@ -74,14 +60,14 @@ export class FacebookChaser {
 
   draw(ctx, theme, beatFlash, assets) {
     const cx = this.x + this.w / 2;
-    const cy = this.y + this.h / 2;
+    const cy = this.y + this.h / 2 + this.wobble;
     const color = this.angry ? '#ff263f' : theme.fbC;
 
     ctx.save();
     ctx.shadowColor = 'red';
     ctx.shadowBlur = 20 + beatFlash * 25;
     ctx.translate(cx, cy);
-    ctx.rotate(Math.sin(cx * 0.015) * 0.1);
+    ctx.rotate(Math.sin(cx * 0.015) * 0.07);
 
     const img = assets && assets.images ? assets.images.get('fb_monster') : null;
     if (img) {

@@ -40,7 +40,7 @@ export const CONFIG = {
   gameplay: {
     startLives: 10,
     oneHitKill: false,
-    useVectorCubeIcon: true,
+    useVectorCubeIcon: false,
     /** Enable FB chaser */
     facebookChaserEnabled: true,
   },
@@ -168,9 +168,9 @@ export const CONFIG = {
       musicIndex: 2,
       theme: {
         bg0: '#100008', bg1: '#1a000e', bg2: '#120008',
-        primary: '#ff2288', accent: '#ffffff',
+        primary: '#ff3333', accent: '#ffffff',
         gnd0: '#2a0012', gnd1: '#160008',
-        line: '#ff2288', obC: '#ff2288', obC2: '#aa0055', fbC: '#880033',
+        line: '#ff3333', obC: '#ff3333', obC2: '#aa0000', fbC: '#880000',
       },
     },
   ],

@@ -10,7 +10,7 @@ export class HUD {
   }
 
   draw(ctx, state) {
-    const { score, level, theme, lives, checkpointActive, dangerDistance, beatFlash } = state;
+    const { score, level, theme, lives, dangerDistance, beatFlash } = state;
     const danger = dangerDistance < 110;
     const caution = dangerDistance < 170;
 
@@ -29,7 +29,15 @@ export class HUD {
     drawProgress(ctx, theme, state.songProgress);
     drawDanger(ctx, caution, danger, theme);
     drawPauseButton(ctx, this.pauseButton);
-    drawLives(ctx, lives, checkpointActive);
+    drawLives(ctx, lives);
+
+    if (state.godMode) {
+      ctx.fillStyle = '#ff00ff';
+      ctx.font = 'bold 12px Arial';
+      ctx.textAlign = 'right';
+      ctx.fillText('GOD MODE ACTIVE', CONFIG.W - 60, 42);
+    }
+
     ctx.restore();
   }
 
@@ -84,19 +92,13 @@ function drawPauseButton(ctx, b) {
   ctx.restore();
 }
 
-function drawLives(ctx, lives, checkpointActive) {
+function drawLives(ctx, lives) {
   ctx.save();
   ctx.textAlign = 'left';
   ctx.textBaseline = 'bottom';
   ctx.font = 'bold 20px Pusab, Arial';
 
   if (CONFIG.gameplay.oneHitKill) {
-    if (checkpointActive) {
-      ctx.fillStyle = '#ffffff';
-      ctx.shadowColor = '#ffffff';
-      ctx.shadowBlur = 8;
-      ctx.fillText('CP', 16, CONFIG.H - 16);
-    }
     ctx.restore();
     return;
   }
@@ -107,12 +109,6 @@ function drawLives(ctx, lives, checkpointActive) {
   ctx.fillStyle = '#ffffff';
   ctx.fillText(liveText || '♡ ×0', 16, CONFIG.H - 16);
 
-  if (checkpointActive) {
-    ctx.font = 'bold 18px Pusab, Arial';
-    ctx.shadowColor = '#ffffff';
-    ctx.shadowBlur = 8;
-    ctx.fillText('🏁', 16 + Math.min(152, Math.max(28, liveText.length * 19)), CONFIG.H - 16);
-  }
   ctx.restore();
 }
 

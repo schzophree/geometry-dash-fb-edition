@@ -41,10 +41,10 @@ export function drawStageBack(ctx, art, level, theme, scroll, beatFlash, frame) 
   drawDeepVignette(ctx, level, theme, beatFlash);
   drawHexBand(ctx, art, level, theme, scroll);
   drawBossHazardBands(ctx, level, theme, scroll, beatFlash, frame);
-  drawBossBackdrop(ctx, level, theme, beatFlash, frame);
+  // drawBossBackdrop removed per request
   drawSparks(ctx, art.sparks, level, theme, scroll, beatFlash, frame);
-  drawBossShardStorm(ctx, art.bossShards, level, theme, scroll, beatFlash, frame);
-  drawPortals(ctx, art.portals, level, theme, scroll, beatFlash, frame);
+  // Sharp boss shards removed; they looked like stray debris/obstacles.
+  // drawPortals removed per request
 }
 
 export function drawStageFront(ctx, art, level, theme, scroll, beatFlash, frame) {
