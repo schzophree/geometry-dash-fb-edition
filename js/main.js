@@ -88,6 +88,87 @@ shapes = createShapes();
 stageArt = createStageArt();
 cyberBoss = new CyberDemonBoss(BOSS_MAPPING);
 
+// ======================================================================
+// BRIDGE: window.gameState reaktif untuk DevTools pause/resume
+// ======================================================================
+let _devPaused = false;
+window.gameState = {};
+Object.defineProperty(window.gameState, 'paused', {
+  get() { return _devPaused; },
+  set(val) {
+    const wantPause = Boolean(val);
+    if (wantPause === _devPaused) return;
+    _devPaused = wantPause;
+    if (wantPause && state === 'playing') {
+      pauseGame();
+    } else if (!wantPause && state === 'paused') {
+      resumeGame();
+    }
+  }
+});
+
+// ======================================================================
+// BRIDGE: window.reloadLevel() - memuat objek kustom dari editor
+// ======================================================================
+window.reloadLevel = function () {
+  const levelData = window.levelData;
+  if (!Array.isArray(levelData) || levelData.length === 0) return;
+
+  // Hapus semua rintangan yang ada
+  obstacles.obstacles = [];
+  obstacles.hearts = [];
+
+  // Muat setiap objek dari editor ke ObstacleManager
+  const TILE = 32; // Ukuran grid editor
+  for (const o of levelData) {
+    const px = o.x * TILE;
+    const py = o.y * TILE;
+
+    switch (o.type) {
+      case 'block':
+        obstacles.obstacles.push({ type: 'block', x: px, y: py, w: TILE, h: TILE, inactive: false, solid: true, surface: 'floor' });
+        break;
+      case 'spike':
+        obstacles.obstacles.push({ type: 'spike', x: px, y: py, w: TILE, h: TILE + 4, inactive: false });
+        break;
+      case 'spike_down':
+        obstacles.obstacles.push({ type: 'spike', x: px, y: py, w: TILE, h: TILE + 4, inactive: false, inverted: true });
+        break;
+      case 'slope_right':
+        obstacles.obstacles.push({ type: 'slope_up', x: px, y: py, w: TILE, h: TILE, inactive: false, solid: true, surface: 'floor' });
+        break;
+      case 'slope_left':
+        obstacles.obstacles.push({ type: 'slope_down', x: px, y: py, w: TILE, h: TILE, inactive: false, solid: true, surface: 'floor' });
+        break;
+      case 'platform':
+        obstacles.obstacles.push({ type: 'block', x: px, y: py, w: TILE, h: 8, inactive: false, solid: true, surface: 'floor' });
+        break;
+      case 'orb_yellow':
+      case 'orb_green':
+      case 'orb_blue':
+      case 'orb_red':
+        obstacles.obstacles.push({ type: o.type, x: px, y: py, w: TILE, h: TILE, inactive: false, primed: false });
+        break;
+      case 'portal_ship':
+      case 'portal_cube':
+      case 'portal_ball':
+      case 'portal_gravity_up':
+      case 'portal_gravity_down':
+        obstacles.obstacles.push({ type: o.type, x: px, y: py, w: 46, h: 86, inactive: false });
+        break;
+      case 'secret_coin':
+        obstacles.obstacles.push({ type: 'secret_coin', x: px, y: py, w: 30, h: 30, inactive: false });
+        break;
+    }
+  }
+  console.log(`[DevTools] Dimuat ${levelData.length} objek kustom ke ObstacleManager`);
+};
+
+// Dengarkan event levelReload dari devtools
+window.addEventListener('levelReload', () => {
+  window.reloadLevel();
+});
+
 // Start the loop only after objects exist to prevent ReferenceErrors
 requestAnimationFrame(loop);
 bindUI();
@@ -147,6 +228,19 @@ function updateProgress() {
   if (screens && typeof screens.showLoading === 'function') {
     screens.showLoading(pct / 100);
   }
+}
+
+function hasSurfaceSupportOverlap(playerHitbox, obs) {
+  const width = obs.w || 36;
+  const inset = Math.min(8, width * 0.2);
+  const left = Math.max(playerHitbox.x, obs.x + inset);
+  const right = Math.min(playerHitbox.x + playerHitbox.w, obs.x + width - inset);
+  return right - left >= Math.min(playerHitbox.w * 0.35, Math.max(8, width * 0.3));
+}
+
+function isNearSurface(value, surface, velocity, dt, lead = 10) {
+  const tolerance = Math.max(18, Math.abs(velocity) * dt + lead);
+  return value <= surface + lead && value >= surface - tolerance;
 }
 
 function getMusicEntryForLevel(levelIndex) {
@@ -256,6 +350,9 @@ function loop(now) {
     } else if (state === 'playing') {
       updatePlaying(dt);
       drawScene(true);
+    } else if (state === 'paused') {
+      // Saat paused, tetap render scene agar layar tidak hitam, tapi tanpa update logika
+      drawScene(false);
     } else if (state === 'dead') {
       updateImpactParticles(dt);
       bgScroll += 1.3 * dt;
@@ -293,9 +390,8 @@ function updatePlaying(dt) {
 
   const activeLevel = getLevel(currentLevelIndex);
   const baseSpeed = activeLevel.speed;
-  const speedBoostStages = Math.floor(score / 300);
-  const speedIncrementPerStage = 0.3;
-  gameSpeed = Math.min(baseSpeed + speedBoostStages * speedIncrementPerStage, baseSpeed + 3.0);
+  // Disabled auto speed boost - keep game speed consistent
+  gameSpeed = baseSpeed;
   obInterval = activeLevel.obInterval;
   bgScroll += gameSpeed * dt;
 
@@ -351,31 +447,32 @@ function updatePlaying(dt) {
 
   let solidFloorY = CONFIG.GROUND_Y;
   let solidCeilingY = 0; 
+  const playerHitbox = player.hitbox();
 
   for (const obs of obstacles.obstacles) {
     if (obs.inactive || obs.type.startsWith('portal_') || obs.type.startsWith('orb_') || obs.type === 'spike') continue;
     if (!obs.solid && obs.type !== 'trampoline' && obs.type !== 'triangle_step') continue;
     
-    if (player.x + player.size > obs.x && player.x < obs.x + obs.w) {
+    if (hasSurfaceSupportOverlap(playerHitbox, obs)) {
       if (obs.type === 'trampoline') {
-        if (player.gravity === 1 && player.y + player.size <= obs.y + 14 && player.vy >= 0) {
+        if (player.gravity === 1 && player.vy >= 0 && isNearSurface(playerHitbox.y + playerHitbox.h, obs.y, player.vy, dt, 8)) {
           solidFloorY = Math.min(solidFloorY, obs.y);
         }
       } else if (obs.type === 'triangle_step' || obs.type.startsWith('slope_')) {
-        const progress = Math.max(0, Math.min(1, (player.x + player.size - obs.x) / obs.w));
+        const progress = Math.max(0, Math.min(1, (playerHitbox.x + playerHitbox.w - obs.x) / obs.w));
         let stepY;
         if (obs.direction === 'up' || obs.type === 'slope_up') {
           stepY = obs.y + obs.h - (progress * obs.h);
         } else {
           stepY = obs.y + (progress * obs.h);
         }
-        if (player.gravity === 1 && player.y + player.size <= stepY + 26 && player.vy >= 0) {
+        if (player.gravity === 1 && player.vy >= 0 && isNearSurface(playerHitbox.y + playerHitbox.h, stepY, player.vy, dt, 14)) {
           solidFloorY = Math.min(solidFloorY, stepY);
         }
       } else {
-        if (player.gravity === 1 && player.y + player.size <= obs.y + 24 && player.vy >= 0) {
+        if (player.gravity === 1 && player.vy >= 0 && isNearSurface(playerHitbox.y + playerHitbox.h, obs.y, player.vy, dt, 10)) {
           solidFloorY = Math.min(solidFloorY, obs.y);
-        } else if (player.gravity === -1 && player.y >= obs.y + obs.h - 24 && player.vy <= 0) {
+        } else if (player.gravity === -1 && player.vy <= 0 && isNearSurface(playerHitbox.y, obs.y + obs.h, player.vy, dt, 10)) {
           solidCeilingY = Math.max(solidCeilingY, obs.y + obs.h);
         }
       }
@@ -438,10 +535,23 @@ function updatePlaying(dt) {
     } else if (hitObs.type === 'secret_coin') {
       hitObs.obs.inactive = true;
       score += 500; // Bonus score
-      audio.playBossCheckpointCue(); // Use as placeholder for collection sound
-      VisualEffects.checkpointPulse();
+      // Sound disabled - silent collection
+      VisualEffects.shake(4, 0.2); // Ganti dengan shake ringan saja
     } else if (hitObs.type === 'lethal' && !player.isInvincible()) {
       applyDamage('Kena rintangan neon.');
+      const obs = hitObs.obs;
+      player.x = CONFIG.player.x;
+
+      if (obs && obs.w && obs.h && obs.type !== 'spike') {
+        const pb = player.hitbox();
+        const hitFromAbove = pb.y + pb.h / 2 < obs.y + obs.h / 2;
+        if (hitFromAbove) {
+          player.y = Math.min(player.y, obs.y - player.size - 4);
+        } else {
+          player.y = Math.max(player.y, obs.y + obs.h + 4);
+        }
+        player.y = clamp(player.y, 0, CONFIG.GROUND_Y - player.size);
+      }
     }
   } else if (CONFIG.gameplay.facebookChaserEnabled && !player.isInvincible() && facebook.caught(player)) {
     applyDamage('Logo Fesnuk berhasil nyentuh cube.');
@@ -557,6 +667,9 @@ function applyDamage(reason) {
       return;
     }
     player.hit();
+    // Auto-jump ketika kena obstacle (dengan arah sesuai gravity)
+    player.vy = CONFIG.player.jumpForce * 1.2 * player.gravity;
+    jumpBufferTimer = 0;
     return;
   }
 
@@ -634,6 +747,7 @@ function startGame({ fromCheckpoint = false, levelIndex = selectedLevel, clearCh
   }
 
   const level = getLevel(currentLevelIndex);
+  window.currentLevelIndex = currentLevelIndex;
   screens.setTheme(level.theme);
   state = 'playing';
   beatFlash = 0;
@@ -651,6 +765,12 @@ function startGame({ fromCheckpoint = false, levelIndex = selectedLevel, clearCh
   if (currentLevelIndex >= 1) obstacles.mirrorMode = true;
   ghost.reset();
   cyberBoss.reset();
+
+  // Jika ada objek kustom dari editor, muat ke ObstacleManager
+  if (Array.isArray(window.levelData) && window.levelData.length > 0) {
+    window.reloadLevel();
+  }
+
   audio.playLevel(currentLevelIndex, fromCheckpoint ? (checkpoint?.audioTime || 0) : 0);
 }
 

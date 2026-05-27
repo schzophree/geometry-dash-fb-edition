@@ -252,6 +252,7 @@ export class AudioEngine {
     return this.muted;
   }
 
+
   playBossCheckpointCue() {
     const sfxList = CONFIG.audio.bossCheckpointSfx || [];
     for (const entry of sfxList) {

@@ -1,0 +1,19 @@
+{
+  "metadata": {
+    "name": "Level 1 - JSON Edition",
+    "difficulty": "EASY",
+    "speed": 5.0,
+    "bpm": 170
+  },
+  "objects": [
+    { "time": 1.0, "type": "gd_spike_run", "count": 1 },
+    { "time": 2.5, "type": "gd_stack", "height": 1 },
+    { "time": 4.0, "type": "gd_spike_run", "count": 2 },
+    { "time": 6.0, "type": "gd_stack", "height": 2 },
+    { "time": 8.0, "type": "PORTAL_GRAVITY_UP" },
+    { "time": 10.0, "type": "gd_orb_line", "orb": "orb_yellow", "lane": "mid" },
+    { "time": 12.0, "type": "PORTAL_GRAVITY_DOWN", "y": 44 },
+    { "time": 15.0, "type": "gd_secret_coin", "y": 260 },
+    { "time": 20.0, "type": "gd_finish_lane" }
+  ]
+}

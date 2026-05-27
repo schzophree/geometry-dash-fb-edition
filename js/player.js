@@ -41,6 +41,7 @@ export class Player {
 
   update(isJumpHeld, solidFloorY = CONFIG.GROUND_Y, solidCeilingY = 0, dt = 1, options = {}) {
     const { targetBossX, targetBossY, autoFire = false } = options;
+    this.x = CONFIG.player.x;
 
     if (autoFire && this.mode === 'ship') {
       this.bulletTimer += dt;

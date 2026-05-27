@@ -64,14 +64,18 @@ export class ObstacleManager {
     }
 
     if (spawnObstacles) {
-      this.processMapping(level.index, audioTime, gameSpeed);
-      this.processRhythmStream(level.index, audioTime);
-      this.heartTimer -= dt;
-      if (this.heartTimer <= 0) {
-        const minY = Math.max(48, CONFIG.GROUND_Y - 180);
-        const maxY = Math.max(minY + 10, CONFIG.GROUND_Y - 62);
-        this.addHeart(CONFIG.W + 20, minY + Math.random() * (maxY - minY));
-        this.heartTimer = this.nextHeartDelay();
+      // Bypass spawning prosedural jika ada objek kustom dari level editor
+      const hasCustomLevel = Array.isArray(window.levelData) && window.levelData.length > 0;
+      if (!hasCustomLevel) {
+        this.processMapping(level.index, audioTime, gameSpeed);
+        this.processRhythmStream(level.index, audioTime);
+        this.heartTimer -= dt;
+        if (this.heartTimer <= 0) {
+          const minY = Math.max(48, CONFIG.GROUND_Y - 180);
+          const maxY = Math.max(minY + 10, CONFIG.GROUND_Y - 62);
+          this.addHeart(CONFIG.W + 20, minY + Math.random() * (maxY - minY));
+          this.heartTimer = this.nextHeartDelay();
+        }
       }
     }
 
@@ -417,9 +421,20 @@ export class ObstacleManager {
         if (intersects(playerHitbox, spikeHitbox)) return { type: 'lethal', obs: o };
       } else if (o.type === 'block') {
         if (intersects(playerHitbox, o)) {
-          const standingOnTop = o.surface !== 'ceiling' && playerHitbox.y + playerHitbox.h <= o.y + 22;
-          const standingUnder = o.surface === 'ceiling' && playerHitbox.y >= o.y + o.h - 22;
-          if (!standingOnTop && !standingUnder) {
+          // MUCH stricter collision: player must be clearly on top/bottom to be safe
+          // Player is SAFE only if truly standing on surface, not penetrating
+          // Top surface: player must be mostly ABOVE block (less than 3 pixels overlap from top)
+          const onTopSurface = o.surface !== 'ceiling' && 
+            playerHitbox.y + playerHitbox.h <= o.y + 3 &&
+            Math.abs((playerHitbox.y + playerHitbox.h) - o.y) < 6;
+          
+          // Bottom surface (ceiling): player must be mostly BELOW block
+          const onBottomSurface = o.surface === 'ceiling' && 
+            playerHitbox.y >= o.y + o.h - 3 &&
+            Math.abs(playerHitbox.y - (o.y + o.h)) < 6;
+          
+          // Collision detected - lethal unless clearly on safe surface
+          if (!onTopSurface && !onBottomSurface) {
             return { type: 'lethal', obs: o };
           }
         }
