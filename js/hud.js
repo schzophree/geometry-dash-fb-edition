@@ -30,6 +30,7 @@ export class HUD {
     drawDanger(ctx, caution, danger, theme);
     drawPauseButton(ctx, this.pauseButton);
     drawLives(ctx, lives);
+    drawCoins(ctx, state.coins || 0);
 
     if (state.godMode) {
       ctx.fillStyle = '#ff00ff';
@@ -109,6 +110,18 @@ function drawLives(ctx, lives) {
   ctx.fillStyle = '#ffffff';
   ctx.fillText(liveText || '♡ ×0', 16, CONFIG.H - 16);
 
+  ctx.restore();
+}
+
+function drawCoins(ctx, coins) {
+  ctx.save();
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'bottom';
+  ctx.font = 'bold 18px Pusab, Arial';
+  ctx.shadowColor = '#ffd700';
+  ctx.shadowBlur = 12;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText(`🪙 ×${coins}`, 16, CONFIG.H - 44);
   ctx.restore();
 }
 

@@ -12,9 +12,30 @@ import { Screens } from './screens.js';
 import { createStageArt, drawStageBack, drawStageFront } from './stage-art.js';
 import { CyberDemonBoss } from './boss.js';
 import { BOSS_MAPPING } from './level-data.js';
+import { MUSIC_LIST } from '../music-list.js';
 
 const canvas = document.getElementById('gameCanvas');
-const ctx = canvas.getContext('2d');
+const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
+ctx.imageSmoothingEnabled = false;
+
+// Global ShadowBlur Interceptor for potato PCs (PC Kentang)
+try {
+  const originalSetShadowBlur = Object.getOwnPropertyDescriptor(CanvasRenderingContext2D.prototype, 'shadowBlur').set;
+  Object.defineProperty(CanvasRenderingContext2D.prototype, 'shadowBlur', {
+    set(value) {
+      if (!getPerfConfig || !getPerfConfig().shadowBlur) {
+        originalSetShadowBlur.call(this, 0);
+      } else {
+        originalSetShadowBlur.call(this, value);
+      }
+    },
+    get() {
+      return Object.getOwnPropertyDescriptor(CanvasRenderingContext2D.prototype, 'shadowBlur').get.call(this);
+    }
+  });
+} catch (e) {
+  console.warn('[Perf] Gagal memasang ShadowBlur interceptor:', e);
+}
 
 let assets, audio, screens, player, obstacles, facebook, ghost, hud, stars, shapes, stageArt, cyberBoss;
 const devParams = new URLSearchParams(window.location.search);
@@ -23,6 +44,7 @@ let state = 'loading';
 let selectedLevel = 0;
 let currentLevelIndex = 0;
 let score = 0;
+let coins = 0;
 let totalDeaths = 0;
 let lives = CONFIG.gameplay.startLives;
 let gameSpeed = getLevel(0).speed;
@@ -40,6 +62,7 @@ let transition = null;
 let levelTransitionFx = null;
 let completeInfo = null;
 let impactParticles = [];
+let collectParticles = [];  // Float-fade-up animation for coins/hearts
 
 let utilityCollisionLock = false;
 let rawLoopPrev = performance.now();
@@ -49,6 +72,7 @@ const progressCheckpoint = {
   saved: false,
   level: 0,
   score: 0,
+  coins: 0,
   progress: 0,
   gameSpeed: 0,
   lives: 0,
@@ -76,7 +100,7 @@ window.addEventListener('resize', resizeCanvas);
 
 // Initialize core objects immediately (synchronously)
 assets = new AssetLoader();
-audio = new AudioEngine(window.MUSIC_LIST || []);
+audio = new AudioEngine(MUSIC_LIST || []);
 screens = new Screens();
 player = new Player();
 obstacles = new ObstacleManager();
@@ -87,6 +111,11 @@ stars = createStars();
 shapes = createShapes();
 stageArt = createStageArt();
 cyberBoss = new CyberDemonBoss(BOSS_MAPPING);
+
+// Expose to window for DevTools/Debugging
+window.player = player;
+window.obstacles = obstacles;
+window.audio = audio;
 
 // ======================================================================
 // BRIDGE: window.gameState reaktif untuk DevTools pause/resume
@@ -154,10 +183,14 @@ window.reloadLevel = function () {
       case 'portal_ball':
       case 'portal_gravity_up':
       case 'portal_gravity_down':
-        obstacles.obstacles.push({ type: o.type, x: px, y: py, w: 46, h: 86, inactive: false });
+        // Align with editor: portals are offset by -0.75 GRID (24px) vertically
+        obstacles.obstacles.push({ type: o.type, x: px, y: py - 24, w: 46, h: 86, inactive: false });
         break;
       case 'secret_coin':
         obstacles.obstacles.push({ type: 'secret_coin', x: px, y: py, w: 30, h: 30, inactive: false });
+        break;
+      case 'heart':
+        obstacles.addHeart(px, py);
         break;
     }
   }
@@ -269,6 +302,7 @@ function checkAndSaveCheckpoint() {
         saved: true,
         level: currentLevelIndex,
         score,
+        coins,
         progress,
         gameSpeed,
         lives,
@@ -292,6 +326,7 @@ function resumeFromProgressCheckpoint() {
   audio.unlock?.();
   currentLevelIndex = cp.level;
   score = cp.score;
+  coins = cp.coins || 0;
   gameSpeed = cp.gameSpeed;
   lives = cp.lives;
   obInterval = cp.obInterval;
@@ -395,15 +430,31 @@ function updatePlaying(dt) {
   obInterval = activeLevel.obInterval;
   bgScroll += gameSpeed * dt;
 
-  const collected = obstacles.update(dt, activeLevel, gameSpeed, obInterval, player.hitbox(), frame, {
-    spawnObstacles: true,
-    audioTime: audioTime,
-    playerGravity: player.gravity,
-  });
-  if (collected > 0) {
-    lives += collected;
-    screenShake = Math.max(screenShake, 2.2);
-  }
+    const collectResult = obstacles.update(dt, activeLevel, gameSpeed, obInterval, player.hitbox(), frame, {
+      spawnObstacles: true,
+      audioTime: audioTime,
+      playerGravity: player.gravity,
+    });
+    if (typeof collectResult === 'object' && collectResult !== null) {
+      if (collectResult.hearts > 0) {
+        lives += collectResult.hearts;
+        screenShake = Math.max(screenShake, 2.2);
+        for (let i = 0; i < collectResult.hearts; i++) {
+          spawnCollectParticle(collectResult.hx || (player.x + player.size/2), collectResult.hy || player.y, '❤️');
+        }
+      }
+      if (collectResult.coins > 0) {
+        score += collectResult.coins * 500;
+        coins += collectResult.coins;
+        screenShake = Math.max(screenShake, 1.5);
+        for (let i = 0; i < collectResult.coins; i++) {
+          spawnCollectParticle(collectResult.cx || (player.x + player.size/2), collectResult.cy || player.y, '🪙');
+        }
+      }
+    } else if (collectResult > 0) {
+      lives += collectResult;
+      screenShake = Math.max(screenShake, 2.2);
+    }
 
   if (CONFIG.gameplay.facebookChaserEnabled) {
     facebook.update(player, gameSpeed, audioTime * 60, frame);
@@ -450,30 +501,100 @@ function updatePlaying(dt) {
   const playerHitbox = player.hitbox();
 
   for (const obs of obstacles.obstacles) {
-    if (obs.inactive || obs.type.startsWith('portal_') || obs.type.startsWith('orb_') || obs.type === 'spike') continue;
+    const obsTypeLower = obs.type.toLowerCase();
+    if (obs.inactive || obsTypeLower.startsWith('portal_') || obsTypeLower.startsWith('orb_') || obsTypeLower === 'spike') continue;
     if (!obs.solid && obs.type !== 'trampoline' && obs.type !== 'triangle_step') continue;
     
     if (hasSurfaceSupportOverlap(playerHitbox, obs)) {
+      const height = obs.h || 36;
+      // Allow extremely lenient support overlap/penetration checks (up to the height of the block/slope)
+      // to completely prevent the player from falling through or getting stuck inside solid objects.
+      const tolerance = Math.max(18, Math.abs(player.vy) * dt + 10);
+      
       if (obs.type === 'trampoline') {
-        if (player.gravity === 1 && player.vy >= 0 && isNearSurface(playerHitbox.y + playerHitbox.h, obs.y, player.vy, dt, 8)) {
-          solidFloorY = Math.min(solidFloorY, obs.y);
+        if (player.gravity === 1 && player.vy >= 0) {
+          const isAboveOrInside = (playerHitbox.y + playerHitbox.h >= obs.y - tolerance) && 
+                                  (playerHitbox.y + playerHitbox.h <= obs.y + height - 4);
+          if (isAboveOrInside) {
+            solidFloorY = Math.min(solidFloorY, obs.y);
+          }
         }
       } else if (obs.type === 'triangle_step' || obs.type.startsWith('slope_')) {
         const progress = Math.max(0, Math.min(1, (playerHitbox.x + playerHitbox.w - obs.x) / obs.w));
         let stepY;
         if (obs.direction === 'up' || obs.type === 'slope_up') {
-          stepY = obs.y + obs.h - (progress * obs.h);
+          stepY = obs.y + height - (progress * height);
         } else {
-          stepY = obs.y + (progress * obs.h);
+          stepY = obs.y + (progress * height);
         }
-        if (player.gravity === 1 && player.vy >= 0 && isNearSurface(playerHitbox.y + playerHitbox.h, stepY, player.vy, dt, 14)) {
-          solidFloorY = Math.min(solidFloorY, stepY);
+        
+        const isCeilingSlope = (obs.inverted || obs.surface === 'ceiling');
+        
+        if (player.gravity === 1) {
+          if (!isCeilingSlope && player.vy >= 0) {
+            const isAboveOrInside = (playerHitbox.y + playerHitbox.h >= stepY - tolerance) && 
+                                    (playerHitbox.y + playerHitbox.h <= obs.y + height - 4);
+            if (isAboveOrInside) {
+              solidFloorY = Math.min(solidFloorY, stepY);
+            }
+          } else if (isCeilingSlope) {
+            // Act as a ceiling barrier under gravity = 1
+            const isBelowOrInside = (playerHitbox.y <= stepY + tolerance) && 
+                                    (playerHitbox.y >= obs.y + 4);
+            if (isBelowOrInside) {
+              solidCeilingY = Math.max(solidCeilingY, stepY);
+            }
+          }
+        } else if (player.gravity === -1) {
+          if (isCeilingSlope && player.vy <= 0) {
+            const isBelowOrInside = (playerHitbox.y <= stepY + tolerance) && 
+                                    (playerHitbox.y >= obs.y + 4);
+            if (isBelowOrInside) {
+              solidCeilingY = Math.max(solidCeilingY, stepY);
+            }
+          } else if (!isCeilingSlope) {
+            // Act as a floor barrier (ceiling for upside down player) under gravity = -1
+            const isAboveOrInside = (playerHitbox.y + playerHitbox.h >= stepY - tolerance) && 
+                                    (playerHitbox.y + playerHitbox.h <= obs.y + height - 4);
+            if (isAboveOrInside) {
+              solidFloorY = Math.min(solidFloorY, stepY);
+            }
+          }
         }
       } else {
-        if (player.gravity === 1 && player.vy >= 0 && isNearSurface(playerHitbox.y + playerHitbox.h, obs.y, player.vy, dt, 10)) {
-          solidFloorY = Math.min(solidFloorY, obs.y);
-        } else if (player.gravity === -1 && player.vy <= 0 && isNearSurface(playerHitbox.y, obs.y + obs.h, player.vy, dt, 10)) {
-          solidCeilingY = Math.max(solidCeilingY, obs.y + obs.h);
+        // Regular blocks
+        if (player.gravity === 1) {
+          if (player.vy >= 0) {
+            const isAboveOrInside = (playerHitbox.y + playerHitbox.h >= obs.y - tolerance) && 
+                                    (playerHitbox.y + playerHitbox.h <= obs.y + height - 4);
+            if (isAboveOrInside) {
+              solidFloorY = Math.min(solidFloorY, obs.y);
+            }
+          }
+          // Also set solidCeilingY if there's a ceiling block above the player to prevent jumping through it
+          if (obs.surface === 'ceiling') {
+            const isBelowOrInside = (playerHitbox.y <= obs.y + height + tolerance) && 
+                                    (playerHitbox.y >= obs.y + 4);
+            if (isBelowOrInside) {
+              solidCeilingY = Math.max(solidCeilingY, obs.y + height);
+            }
+          }
+        } else if (player.gravity === -1) {
+          if (player.vy <= 0) {
+            const isBelowOrInside = (playerHitbox.y <= obs.y + height + tolerance) && 
+                                    (playerHitbox.y >= obs.y + 4);
+            if (isBelowOrInside) {
+              solidCeilingY = Math.max(solidCeilingY, obs.y + height);
+            }
+          }
+          // Also set solidFloorY if there's a floor block below the player to prevent falling through it under reverse gravity
+          if (obs.surface !== 'ceiling') {
+            const isAboveOrInside = (playerHitbox.y + playerHitbox.h >= obs.y - tolerance) && 
+                                    (playerHitbox.y + playerHitbox.h <= obs.y + height - 4);
+            if (isAboveOrInside) {
+              solidFloorY = Math.min(solidFloorY, obs.y);
+            }
+          }
         }
       }
     }
@@ -488,7 +609,8 @@ function updatePlaying(dt) {
   player.update(wantsToJump, solidFloorY, solidCeilingY, dt, {
     autoFire: activeLevel.index === 2,
     targetBossX: cyberBoss.x,
-    targetBossY: cyberBoss.y
+    targetBossY: cyberBoss.y,
+    obstacles: obstacles.obstacles
   });
   const jumped = (player.gravity === 1 && player.vy < 0 && (oldVy >= 0 || player.justLanded)) ||
                  (player.gravity === -1 && player.vy > 0 && (oldVy <= 0 || player.justLanded));
@@ -506,15 +628,12 @@ function updatePlaying(dt) {
     if (hitObs.type === 'utility') {
       const obs = hitObs.obs;
       if (!utilityCollisionLock) {
-        if (obs.type.startsWith('portal_')) {
-          const nowP = performance.now();
-          if (nowP - (obs.lastTriggered || 0) >= 1000) {
-            obs.lastTriggered = nowP;
-            utilityCollisionLock = true;
-            handlePortal(obs.type);
-            obs.inactive = true;
-            setTimeout(() => (utilityCollisionLock = false), 300);
-          }
+        if (obs.type.toLowerCase().startsWith('portal_')) {
+          utilityCollisionLock = true;
+          handlePortal(obs.type);
+          obs.inactive = true;
+          // Very short lock for portals to allow rapid switching if needed
+          setTimeout(() => (utilityCollisionLock = false), 50); 
         } else if (obs.type.startsWith('orb_')) {
           if (isJumpHeld) {
             utilityCollisionLock = true;
@@ -522,7 +641,7 @@ function updatePlaying(dt) {
             obs.inactive = true;
             screenShake = Math.max(screenShake, 3);
             beatFlash = 1;
-            setTimeout(() => (utilityCollisionLock = false), 300);
+            setTimeout(() => (utilityCollisionLock = false), 150);
           } else {
             obs.primed = true;
           }
@@ -535,22 +654,18 @@ function updatePlaying(dt) {
     } else if (hitObs.type === 'secret_coin') {
       hitObs.obs.inactive = true;
       score += 500; // Bonus score
-      // Sound disabled - silent collection
-      VisualEffects.shake(4, 0.2); // Ganti dengan shake ringan saja
+      coins += 1;
+      spawnCollectParticle(hitObs.obs.x + 15, hitObs.obs.y, '🪙');
+      VisualEffects.shake(4, 0.2);
     } else if (hitObs.type === 'lethal' && !player.isInvincible()) {
-      applyDamage('Kena rintangan neon.');
       const obs = hitObs.obs;
-      player.x = CONFIG.player.x;
-
-      if (obs && obs.w && obs.h && obs.type !== 'spike') {
-        const pb = player.hitbox();
-        const hitFromAbove = pb.y + pb.h / 2 < obs.y + obs.h / 2;
-        if (hitFromAbove) {
-          player.y = Math.min(player.y, obs.y - player.size - 4);
-        } else {
-          player.y = Math.max(player.y, obs.y + obs.h + 4);
-        }
-        player.y = clamp(player.y, 0, CONFIG.GROUND_Y - player.size);
+      applyDamage(obs.type === 'spike' ? 'Kena duri tajam.' : 'Menabrak rintangan neon.', obs);
+      
+      if (lives > 0) {
+        // Removed knockback (moving x backwards) to keep movement smooth as requested.
+        
+        // Removed abrupt player.y teleportation that caused glitching.
+        // The auto-jump in applyDamage() is enough to clear the obstacle smoothly.
       }
     }
   } else if (CONFIG.gameplay.facebookChaserEnabled && !player.isInvincible() && facebook.caught(player)) {
@@ -592,11 +707,12 @@ function handleOrb(type) {
 }
 
 function handlePortal(type) {
-  if (type.includes('ship') && player.mode !== 'ship') player.setMode('ship');
-  else if (type.includes('cube') && player.mode !== 'cube') player.setMode('cube');
-  else if (type.includes('ball') && player.mode !== 'ball') player.setMode('ball');
-  else if (type.includes('gravity_up') && player.gravity !== -1) player.setGravity(-1);
-  else if (type.includes('gravity_down') && player.gravity !== 1) player.setGravity(1);
+  const t = type.toLowerCase();
+  if (t.includes('ship') && player.mode !== 'ship') player.setMode('ship');
+  else if (t.includes('cube') && player.mode !== 'cube') player.setMode('cube');
+  else if (t.includes('ball') && player.mode !== 'ball') player.setMode('ball');
+  else if (t.includes('gravity_up') && player.gravity !== -1) player.setGravity(-1);
+  else if (t.includes('gravity_down') && player.gravity !== 1) player.setGravity(1);
 }
 
 function handleLevelTransition() {
@@ -616,6 +732,7 @@ function handleLevelTransition() {
   checkpoint = {
     level: nextIndex,
     score: score,
+    coins,
     lives,
     gameSpeed,
     obInterval,
@@ -652,7 +769,7 @@ function handleLevelTransition() {
   audio.playLevel(currentLevelIndex, 0);
 }
 
-function applyDamage(reason) {
+function applyDamage(reason, obs = null) {
   if (player.isInvincible() || godMode) return;
   audio.playHitSfx();
   totalDeaths++;
@@ -661,14 +778,29 @@ function applyDamage(reason) {
   if (lives > 0) {
     lives -= 1;
     spawnImpact(player.x + player.size / 2, player.y + player.size / 2, '#ff4488', 18);
-    screenShake = Math.max(screenShake, 8);
+    screenShake = Math.max(screenShake, 6); // Reduced from 8
     if (lives <= 0) {
       triggerGameOver(reason);
       return;
     }
     player.hit();
-    // Auto-jump ketika kena obstacle (dengan arah sesuai gravity)
-    player.vy = CONFIG.player.jumpForce * 1.2 * player.gravity;
+    
+    // Determine bounce direction based on obstacle position relative to player
+    // to prevent getting launched deeper into obstacles (e.g. hitting ceiling obstacles)
+    let bounceDirection = -player.gravity; // Default: bounce opposite of gravity
+    if (obs) {
+      const obsCenterY = obs.y + (obs.h || 36) / 2;
+      const playerCenterY = player.y + player.size / 2;
+      if (obsCenterY < playerCenterY) {
+        // Obstacle is above player, bounce DOWN
+        bounceDirection = 1;
+      } else {
+        // Obstacle is below player, bounce UP
+        bounceDirection = -1;
+      }
+    }
+    
+    player.vy = Math.abs(CONFIG.player.jumpForce) * 1.15 * bounceDirection;
     jumpBufferTimer = 0;
     return;
   }
@@ -679,8 +811,17 @@ function applyDamage(reason) {
 function triggerGameOver(reason) {
   state = 'dead';
   audio.muffleDeath();
-  spawnImpact(player.x + player.size / 2, player.y + player.size / 2, '#ff3355', 42);
-  screenShake = Math.max(screenShake, CONFIG.camera.shakeOnDeath.intensity);
+  
+  // Create a big explosion at player position
+  spawnImpact(player.x + player.size / 2, player.y + player.size / 2, '#ff3355', 60);
+  spawnImpact(player.x + player.size / 2, player.y + player.size / 2, '#ffffff', 20);
+  
+  screenShake = Math.max(screenShake, CONFIG.camera.shakeOnDeath.intensity * 1.25); // Reduced from 1.5
+  VisualEffects.triggerInvert(0.12); // Shorter, cleaner glitch (from 0.3)
+
+  // Hide player trail/bullets immediately
+  player.trail = [];
+  player.bullets = [];
 
   screens.showGameOver({
     score,
@@ -728,6 +869,7 @@ function startGame({ fromCheckpoint = false, levelIndex = selectedLevel, clearCh
     clearProgressCheckpoint();
     currentLevelIndex = checkpoint.level;
     score = checkpoint.score;
+    coins = checkpoint.coins || 0;
     lives = checkpoint.lives;
     gameSpeed = checkpoint.gameSpeed;
     obInterval = checkpoint.obInterval;
@@ -740,6 +882,7 @@ function startGame({ fromCheckpoint = false, levelIndex = selectedLevel, clearCh
     currentLevelIndex = clamp(levelIndex, 0, CONFIG.levels.length - 1);
     const lv = getLevel(currentLevelIndex);
     score = 0;
+    coins = 0;
     totalDeaths = 0;
     lives = CONFIG.gameplay.startLives;
     gameSpeed = lv.speed;
@@ -748,6 +891,15 @@ function startGame({ fromCheckpoint = false, levelIndex = selectedLevel, clearCh
 
   const level = getLevel(currentLevelIndex);
   window.currentLevelIndex = currentLevelIndex;
+  
+  // Load custom level data from music list if available
+  const musicEntry = (MUSIC_LIST || [])[currentLevelIndex];
+  if (musicEntry && musicEntry.levelData) {
+    window.levelData = musicEntry.levelData;
+  } else {
+    window.levelData = null;
+  }
+
   screens.setTheme(level.theme);
   state = 'playing';
   beatFlash = 0;
@@ -766,7 +918,7 @@ function startGame({ fromCheckpoint = false, levelIndex = selectedLevel, clearCh
   ghost.reset();
   cyberBoss.reset();
 
-  // Jika ada objek kustom dari editor, muat ke ObstacleManager
+  // Jika ada objek kustom (dari music-list atau editor), muat ke ObstacleManager
   if (Array.isArray(window.levelData) && window.levelData.length > 0) {
     window.reloadLevel();
   }
@@ -822,7 +974,39 @@ function updateImpactParticles(dt) {
     p.life -= 0.03 * dt;
   }
   impactParticles = impactParticles.filter((p) => p.life > 0);
+
+  // Update collection particles (float-fade-up emoji animation)
+  for (const cp of collectParticles) {
+    cp.y -= 1.5 * dt; // Float upward
+    cp.x += Math.sin(cp.phase + performance.now() * 0.003) * 0.3 * dt;
+    cp.life -= 0.02 * dt;
+    cp.scale = 0.6 + cp.life * 0.6;
+  }
+  collectParticles = collectParticles.filter((cp) => cp.life > 0);
 }
+
+function spawnCollectParticle(x, y, emoji) {
+  collectParticles.push({
+    x, y,
+    emoji,
+    life: 1.0,
+    scale: 1.0,
+    phase: Math.random() * Math.PI * 2,
+  });
+}
+
+function drawCollectParticles(ctx) {
+  for (const cp of collectParticles) {
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, cp.life);
+    ctx.font = `${Math.round(20 * cp.scale)}px Arial`;
+    ctx.textAlign = 'center';
+    ctx.fillText(cp.emoji, cp.x, cp.y);
+    ctx.restore();
+  }
+}
+
+
 
 function easeInOutCubic(t) {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
@@ -896,7 +1080,7 @@ function drawScene(drawHud) {
     }
   }
 
-  if (state !== 'start') {
+  if (state !== 'start' && state !== 'dead') {
     player.drawTrail(ctx, theme);
     player.drawBullets(ctx, theme);
     assets.drawPlayer(ctx, player, theme, beatFlash);
@@ -909,6 +1093,9 @@ function drawScene(drawHud) {
     ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
   }
   ctx.globalAlpha = 1;
+
+  // Draw collection particles (floating emoji for coins/hearts, numbers removed!)
+  drawCollectParticles(ctx);
 
   ctx.restore();
 
@@ -964,6 +1151,7 @@ function drawScene(drawHud) {
     const dangerDist = CONFIG.gameplay.facebookChaserEnabled ? (player.x - facebook.x) : 1000;
     hud.draw(ctx, {
       score,
+      coins,
       level: getLevel(currentLevelIndex),
       theme,
       lives,

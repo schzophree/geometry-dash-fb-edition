@@ -36,15 +36,33 @@
   let clipboard = [];       // Array objek yang dicopy
   let isSelectionDragging = false;
   let isDraggingObjects = false; // Memindahkan objek yang dipilih
+  let isDuplicating = false;     // Mode Ctrl+Drag untuk duplikasi
   let dragStartPos = { x: 0, y: 0 };
   let selectionStart = { x: 0, y: 0 };
   let selectionEnd = { x: 0, y: 0 };
   let focusedToolIndex = 0; // Index tool yang sedang difokuskan keyboard
 
   // Timeline / Level Progress
-  let levelTotalTime = 90; // Default seconds
+  let levelTotalTime = 90; // Default seconds, will be synced
   let currentTimelineX = 0; // Posisi x dalam pixel (setara waktu)
   let isSeeking = false;
+
+  function syncLevelDuration() {
+    try {
+      if (window.MUSIC_LIST && window.currentLevelIndex !== undefined) {
+        const music = window.MUSIC_LIST[window.currentLevelIndex];
+        // Deteksi durasi dari file atau mapping
+        if (window.currentLevelIndex === 0) levelTotalTime = 305;
+        else if (window.currentLevelIndex === 1) levelTotalTime = 256;
+        else if (window.currentLevelIndex === 2) levelTotalTime = 277;
+        
+        // Coba cari dari metadata jika ada
+        if (music && music.duration) levelTotalTime = music.duration;
+      }
+    } catch (e) {
+      console.warn("Gagal sinkronisasi durasi musik:", e);
+    }
+  }
 
   // Kamera / Pan offset
   let cameraX = 0;
@@ -388,6 +406,7 @@
 
         <div class="gd-dev-section-title">AKSI</div>
         <div class="gd-dev-actions">
+          <button id="gd-btn-auto-pilot" class="gd-dev-btn">🤖 Auto Pilot: OFF</button>
           <button id="gd-btn-save" class="gd-dev-btn primary">💾 Simpan JSON</button>
           <button id="gd-btn-load" class="gd-dev-btn">📋 Muat JSON</button>
           <button id="gd-btn-undo" class="gd-dev-btn">↩ Batalkan (Ctrl+Z)</button>
@@ -440,6 +459,15 @@
         updateToolFocus();
         updateCanvasCursor();
       });
+    });
+
+    document.getElementById('gd-btn-auto-pilot').addEventListener('click', () => {
+      if (window.player) {
+        window.player.autoPilot = !window.player.autoPilot;
+        const btn = document.getElementById('gd-btn-auto-pilot');
+        btn.textContent = `🤖 Auto Pilot: ${window.player.autoPilot ? 'ON' : 'OFF'}`;
+        btn.classList.toggle('primary', window.player.autoPilot);
+      }
     });
 
     document.getElementById('gd-btn-save').addEventListener('click', saveJSON);
@@ -679,7 +707,8 @@
     if (!overlay) return;
 
     if (isDevModeActive) {
-      overlay.style.display = 'block';
+      syncLevelDuration();
+      overlayContainer.style.display = 'block';
       window.levelData = window.levelData || [];
       updateObjectsCount();
 
@@ -789,11 +818,23 @@
           eraseAt(tile.x, tile.y);
         } else if (activeTool === 'select') {
           const isOverSelected = selectedObjects.some(o => o.x === tile.x && o.y === tile.y);
-          if (isOverSelected && !e.ctrlKey) {
+          if (isOverSelected) {
             // Mulai drag objek
             isDraggingObjects = true;
             dragStartPos = { x: tile.x, y: tile.y };
             saveToHistory();
+
+            // Jika tekan Ctrl saat menyeret objek terpilih -> Duplikasi (Photoshop style)
+            if (e.ctrlKey) {
+              isDuplicating = true;
+              const newCopies = selectedObjects.map(o => ({ 
+                ...o, 
+                _placedAt: Date.now() + Math.random() 
+              }));
+              window.levelData.push(...newCopies);
+              selectedObjects = newCopies; // Fokus ke salinan baru
+              console.log(`%c✨ Duplikasi ${newCopies.length} objek (Ctrl+Drag)`, "color: #00ff88;");
+            }
           } else {
             const objAtTile = window.levelData.find(o => o.x === tile.x && o.y === tile.y);
             if (objAtTile || e.ctrlKey) {
@@ -886,6 +927,7 @@
       isDrawing = false;
       isSelectionDragging = false;
       isDraggingObjects = false;
+      isDuplicating = false;
       lastPlacedTile = null;
       if (isPanning) {
         isPanning = false;
@@ -1104,6 +1146,11 @@
     window.levelData = history.pop();
     updateObjectsCount();
     triggerReload();
+  }
+
+  function selectAllObjects() {
+    selectedObjects = window.levelData.map(o => ({ ...o }));
+    console.log(`%c🎯 Memilih semua (${selectedObjects.length} objek)`, "color: #00ffff;");
   }
 
   function updateObjectsCount() {
@@ -1629,6 +1676,7 @@
   // ============================
   function devtoolsRenderLoop() {
     if (!isDevModeActive) return;
+    syncLevelDuration();
     if (overlayCanvas) {
       const ctx = overlayCanvas.getContext('2d');
       drawLevelData(ctx);

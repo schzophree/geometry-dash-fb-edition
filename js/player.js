@@ -22,6 +22,7 @@ export class Player {
     this.justLanded = false;
     this.coyote = CONFIG.player.coyoteFrames;
     this.invincible = 0;
+    this.autoPilot = false;
     this.trail = [];
     this.bullets = [];
     this.bulletTimer = 0;
@@ -40,8 +41,50 @@ export class Player {
   }
 
   update(isJumpHeld, solidFloorY = CONFIG.GROUND_Y, solidCeilingY = 0, dt = 1, options = {}) {
-    const { targetBossX, targetBossY, autoFire = false } = options;
-    this.x = CONFIG.player.x;
+    const { targetBossX, targetBossY, autoFire = false, obstacles = [] } = options;
+    
+    // Auto Pilot Logic
+    let botJump = false;
+    if (this.autoPilot) {
+      const lookAhead = 120; // pixels to look ahead
+      const pb = this.hitbox();
+      
+      for (const obs of obstacles) {
+        if (obs.inactive) continue;
+        
+        const dist = obs.x - (pb.x + pb.w);
+        if (dist > -20 && dist < lookAhead) {
+          // Dangerous obstacles
+          if (obs.type === 'spike' || obs.type === 'block' || obs.type.startsWith('slope_')) {
+            // Only jump if obstacle is in our path
+            const willHit = (this.gravity === 1 && obs.y < pb.y + pb.h + 20) || 
+                            (this.gravity === -1 && obs.y + (obs.h || 36) > pb.y - 20);
+            if (willHit) {
+              botJump = true;
+              break;
+            }
+          }
+          // Orbs
+          if (obs.type.startsWith('orb_')) {
+            if (dist < 10) { // Hit orb when very close
+              botJump = true;
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    const effectiveJump = isJumpHeld || botJump;
+    
+    // Smoothly return to default X if knocked back
+    if (this.x < CONFIG.player.x) {
+      this.x += (CONFIG.player.x - this.x) * 0.1;
+      if (Math.abs(this.x - CONFIG.player.x) < 0.5) this.x = CONFIG.player.x;
+    } else if (this.x > CONFIG.player.x) {
+      this.x -= (this.x - CONFIG.player.x) * 0.1;
+      if (Math.abs(this.x - CONFIG.player.x) < 0.5) this.x = CONFIG.player.x;
+    }
 
     if (autoFire && this.mode === 'ship') {
       this.bulletTimer += dt;
@@ -68,7 +111,7 @@ export class Player {
       const shipMaxSpeed = 6.8; // Lebih terkendali (sebelumnya 7.5)
       const shipFriction = 0.985; // Menghindari nempel di ujung
 
-      if (isJumpHeld) {
+      if (effectiveJump) {
         this.vy -= shipAccel * this.gravity;
       } else {
         this.vy += gravForce * 0.55; // Lebih melayang (sebelumnya 0.65)
@@ -133,24 +176,18 @@ export class Player {
 
     // Auto-jump when holding on landing or press jump on ground (GD mechanic)
     const canAutoJump = (this.gravity === 1 && this.onGround) || (this.gravity === -1 && this.onCeiling);
-    if (isJumpHeld && canAutoJump && this.mode !== 'ship') {
+    if (effectiveJump && canAutoJump && this.mode !== 'ship') {
       this.jump();
     }
     if (this.invincible > 0) this.invincible--;
 
-    this.trail.push({
-      x: this.x,
-      y: this.y,
-      sz: this.size,
-      rot: this.rot,
-      life: 1,
-      mode: this.mode,
-    });
-    for (const item of this.trail) item.life -= CONFIG.player.trailLifeStep;
-    this.trail = this.trail.filter((item) => item.life > 0);
+    this.updateTrailSparks(dt);
+    this.spawnTrailSparks();
+
     const maxTrail = getPerfConfig().particles + 12;
     while (this.trail.length > maxTrail) this.trail.shift();
   }
+
 
   jump(customVy = null) {
     if (this.mode === 'ball' && !customVy) {
@@ -206,17 +243,90 @@ export class Player {
 
   drawTrail(ctx, theme) {
     ctx.save();
-    for (const item of this.trail) {
+    ctx.shadowBlur = 0;
+    for (const spark of this.trail) {
+      const alpha = Math.max(0, spark.life / spark.maxLife);
+      const color = spark.color === 'accent' ? theme.accent : spark.color === 'line' ? theme.line : theme.primary;
       ctx.save();
-      ctx.globalAlpha = item.life * 0.42;
-      ctx.translate(item.x + item.sz / 2, item.y + item.sz / 2);
-      if (item.gravity === -1) ctx.scale(1, -1);
-      ctx.rotate(item.rot);
-      ctx.fillStyle = theme.primary;
-      ctx.fillRect(-item.sz / 2, -item.sz / 2, item.sz, item.sz);
+      ctx.globalAlpha = alpha * 0.72;
+      ctx.translate(spark.x, spark.y);
+      ctx.rotate(spark.rot);
+      ctx.fillStyle = color;
+
+      if (spark.shape === 'circle') this.drawTrailCircle(ctx, spark.size);
+      else if (spark.shape === 'ship') this.drawTrailShard(ctx, spark.size);
+      else this.drawTrailPixel(ctx, spark.size);
+
       ctx.restore();
     }
     ctx.restore();
+  }
+
+  updateTrailSparks(dt) {
+    for (const spark of this.trail) {
+      spark.x += spark.vx * dt;
+      spark.y += spark.vy * dt;
+      spark.vx *= 0.985;
+      spark.vy *= 0.96;
+      spark.rot += spark.spin * dt;
+      spark.life -= CONFIG.player.trailLifeStep * (spark.decay || 1);
+    }
+    this.trail = this.trail.filter((spark) => spark.life > 0);
+  }
+
+  spawnTrailSparks() {
+    if (this.mode === 'ship') {
+      if (Math.random() > 0.72) return;
+    } else if (Math.random() > 0.45) {
+      return;
+    }
+
+    const count = this.mode === 'ship' ? 2 : 1;
+    const baseX = this.x + this.size * 0.18;
+    const baseY = this.y + this.size * 0.52;
+
+    for (let i = 0; i < count; i++) {
+      const isShip = this.mode === 'ship';
+      const isBall = this.mode === 'ball';
+      const maxLife = 0.7 + Math.random() * 0.35;
+      const scatterX = -Math.random() * this.size * (isShip ? 0.62 : 0.50);
+      const scatterY = (Math.random() - 0.5) * this.size * (isShip ? 0.34 : 0.42);
+
+      this.trail.push({
+        x: baseX + scatterX,
+        y: baseY + scatterY,
+        vx: -1.35 - Math.random() * (isShip ? 3.4 : 2.2),
+        vy: (Math.random() - 0.5) * (isShip ? 2.4 : 1.8) + this.vy * 0.06,
+        rot: isShip ? this.rot + (Math.random() - 0.5) * 0.8 : Math.random() * Math.PI,
+        spin: (Math.random() - 0.5) * (isShip ? 0.18 : 0.08),
+        size: Math.max(2, this.size * (0.045 + Math.random() * (isShip ? 0.07 : 0.055))),
+        life: maxLife,
+        maxLife,
+        decay: 0.85 + Math.random() * 0.45,
+        color: i === 0 ? 'primary' : isShip ? 'accent' : Math.random() > 0.65 ? 'line' : 'primary',
+        shape: isShip ? 'ship' : isBall ? 'circle' : 'pixel',
+      });
+    }
+  }
+
+  drawTrailPixel(ctx, size) {
+    ctx.fillRect(-size / 2, -size / 2, size, size);
+  }
+
+  drawTrailCircle(ctx, size) {
+    ctx.beginPath();
+    ctx.arc(0, 0, size * 0.58, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  drawTrailShard(ctx, size) {
+    ctx.beginPath();
+    ctx.moveTo(size * 1.45, 0);
+    ctx.lineTo(-size * 1.1, -size * 0.85);
+    ctx.lineTo(-size * 0.65, 0);
+    ctx.lineTo(-size * 1.1, size * 0.85);
+    ctx.closePath();
+    ctx.fill();
   }
 
   drawBullets(ctx, theme) {

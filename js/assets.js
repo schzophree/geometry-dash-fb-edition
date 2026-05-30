@@ -274,9 +274,11 @@ export class AssetLoader {
     }
 
     if (player.isInvincible()) {
-      ctx.globalAlpha = 0.5 + Math.sin(performance.now() * 0.02) * 0.5;
+      ctx.globalCompositeOperation = 'source-atop';
+      ctx.globalAlpha = 0.28 + Math.sin(performance.now() * 0.02) * 0.22;
       ctx.fillStyle = '#ff4444';
       ctx.fillRect(-pSize / 2, -pSize / 2, pSize, pSize);
+      ctx.globalCompositeOperation = 'source-over';
     }
 
     ctx.restore();

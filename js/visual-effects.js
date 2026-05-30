@@ -135,6 +135,7 @@ export const VisualEffects = (() => {
 
     drawGrid(ctx, theme, scroll, beatFlash, levelName) {
       if (levelName === 'BOSS') return;
+      // Persistent floor fix: grid ALWAYS renders regardless of perf tier
       ctx.save();
       const gridColor = levelName === 'LOADING' ? theme.line : theme.accent;
       ctx.strokeStyle = gridColor || '#00d4ff';
@@ -163,12 +164,16 @@ export const VisualEffects = (() => {
     },
 
     drawGroundGlow(ctx, theme, beatFlash) {
+      // Persistent floor fix: ground glow ALWAYS renders
       ctx.save();
       const W = CONFIG.W || 800;
       const GROUND_Y = CONFIG.GROUND_Y || 385;
       ctx.fillStyle = theme.primary || '#00d4ff';
-      ctx.globalAlpha = 0.2 + (beatFlash || 0) * 0.3;
+      ctx.globalAlpha = 0.25 + (beatFlash || 0) * 0.3;
       ctx.fillRect(0, GROUND_Y, W, 4);
+      // Additional floor line to ensure visibility
+      ctx.globalAlpha = 0.6;
+      ctx.fillRect(0, GROUND_Y - 1, W, 2);
       ctx.restore();
     },
 

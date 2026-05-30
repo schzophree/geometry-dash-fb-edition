@@ -1,4 +1,10 @@
-window.MUSIC_LIST = [
+// Mengimpor data rintangan yang sudah di-generate secara otomatis oleh script Python
+import { LEVEL1_DATA, LEVEL2_DATA, LEVEL3_DATA } from './js/generated-levels.js';
+
+// =====================================================================
+// DAFTAR LAGU DAN LEVEL
+// =====================================================================
+export const MUSIC_LIST = [
   {
     file: 'assets/audio/bgm/level1.mp3',
     name: 'Sunshine (feat. moimoi)',
@@ -17,6 +23,8 @@ window.MUSIC_LIST = [
     minInterval: 21,
     speed: 5.0,
     scoreEnd: 900,
+    // Menggunakan data rintangan dari hasil generate Python
+    levelData: LEVEL1_DATA 
   },
   {
     file: 'assets/audio/bgm/level2.mp3',
@@ -36,6 +44,8 @@ window.MUSIC_LIST = [
     minInterval: 20,
     speed: 6.2,
     scoreEnd: 2100,
+    // Menggunakan data rintangan dari hasil generate Python
+    levelData: LEVEL2_DATA 
   },
   {
     file: 'assets/audio/bgm/boss.mp3',
@@ -57,5 +67,9 @@ window.MUSIC_LIST = [
     speed: 7.8,
     scoreEnd: Infinity,
     isBoss: true,
-  },
+    // Menggunakan data rintangan dari hasil generate Python
+    levelData: LEVEL3_DATA 
+  }
 ];
+
+window.MUSIC_LIST = MUSIC_LIST;

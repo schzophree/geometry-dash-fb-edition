@@ -15,4 +15,4 @@ plan.assets/js/
 screenshot/
 UPDATE_GDF_V1.2.beta.md
 UPDATE_GDF_V1.3.
-.cache/
+.cache/*:Zone.Identifier

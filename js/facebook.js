@@ -62,10 +62,11 @@ export class FacebookChaser {
     const cx = this.x + this.w / 2;
     const cy = this.y + this.h / 2 + this.wobble;
     const color = this.angry ? '#ff263f' : theme.fbC;
+    const glowColor = this.angry ? '#ff0000' : (theme.fbC || '#4267B2');
 
     ctx.save();
-    ctx.shadowColor = 'red';
-    ctx.shadowBlur = 20 + beatFlash * 25;
+    ctx.shadowColor = glowColor;
+    ctx.shadowBlur = this.angry ? (25 + beatFlash * 35) : (10 + beatFlash * 15);
     ctx.translate(cx, cy);
     ctx.rotate(Math.sin(cx * 0.015) * 0.07);
 
@@ -73,8 +74,10 @@ export class FacebookChaser {
     if (img) {
       let scale = 1.0;
       if (this.angry) {
-          scale = 1.08 + Math.sin(performance.now() / 40) * 0.06;
-          ctx.filter = 'brightness(1.2) contrast(1.3) hue-rotate(-10deg)';
+          scale = 1.12 + Math.sin(performance.now() / 35) * 0.08;
+          ctx.filter = 'brightness(1.2) contrast(1.4) saturate(1.2) hue-rotate(-5deg)';
+      } else {
+          ctx.globalAlpha = 0.85 + beatFlash * 0.15;
       }
       ctx.scale(scale, scale);
       ctx.drawImage(img, -this.w / 2, -this.h / 2, this.w, this.h);

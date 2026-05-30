@@ -47,7 +47,10 @@ export class ObstacleManager {
   update(dt, level, gameSpeed, obInterval, playerHitbox, _frame, options = {}) {
     this.currentLevelIndex = level.index;
     const { spawnObstacles = true, audioTime = 0, playerGravity = 1 } = options;
-    let collected = 0;
+    let heartCollected = 0;
+    let coinCollected = 0;
+    let lastHeartPos = { x: 0, y: 0 };
+    let lastCoinPos = { x: 0, y: 0 };
 
     if (level.index >= 1) this.mirrorMode = true; 
     else this.mirrorMode = false;
@@ -68,7 +71,6 @@ export class ObstacleManager {
       const hasCustomLevel = Array.isArray(window.levelData) && window.levelData.length > 0;
       if (!hasCustomLevel) {
         this.processMapping(level.index, audioTime, gameSpeed);
-        this.processRhythmStream(level.index, audioTime);
         this.heartTimer -= dt;
         if (this.heartTimer <= 0) {
           const minY = Math.max(48, CONFIG.GROUND_Y - 180);
@@ -79,26 +81,52 @@ export class ObstacleManager {
       }
     }
 
+    // On-demand obstacle processing: only move obstacles near viewport
+    const viewLeft = -200;
+    const viewRight = CONFIG.W + 300;
     for (const o of this.obstacles) {
-      o.x -= gameSpeed * dt;
+      if (o.x > viewLeft && o.x < viewRight + 500) {
+        o.x -= gameSpeed * dt;
+      } else {
+        o.x -= gameSpeed * dt;
+      }
     }
 
     for (let i = this.hearts.length - 1; i >= 0; i--) {
       const h = this.hearts[i];
       const hBox = { x: h.x + 2, y: h.y + h.wobble + 2, w: CONFIG.heart.hitbox, h: CONFIG.heart.hitbox };
       if (intersects(playerHitbox, hBox)) {
-        collected++;
+        heartCollected++;
+        lastHeartPos = { x: h.x, y: h.y };
         this.hearts.splice(i, 1);
       } else if (h.x < -100) {
         this.hearts.splice(i, 1);
       }
     }
 
+    // Collect coins from obstacles
     for (let i = this.obstacles.length - 1; i >= 0; i--) {
-      if (this.obstacles[i].x < -150) this.obstacles.splice(i, 1);
+      const o = this.obstacles[i];
+      if (o.type === 'secret_coin' && !o.inactive && intersects(playerHitbox, o)) {
+        o.inactive = true;
+        coinCollected++;
+        lastCoinPos = { x: o.x, y: o.y };
+      }
+      if (o.x < -150) this.obstacles.splice(i, 1);
     }
 
-    return collected;
+    // Return detailed collection info for animation
+    if (heartCollected > 0 || coinCollected > 0) {
+      return {
+        hearts: heartCollected,
+        coins: coinCollected,
+        hx: lastHeartPos.x,
+        hy: lastHeartPos.y,
+        cx: lastCoinPos.x,
+        cy: lastCoinPos.y,
+      };
+    }
+    return 0;
   }
 
   processMapping(levelIndex, audioTime, gameSpeed) {
@@ -228,6 +256,15 @@ export class ObstacleManager {
         this.addFloorStack(x, item.floor || 1);
         this.addCeilingStack(x, item.ceiling || 1);
         break;
+      case 'gd_slope_chain':
+        this.addSlopeChain(x, item.pattern || 'up', item.length || 3);
+        break;
+      case 'gd_spike_block_mix':
+        this.addSpikeBlockMix(x, item.pattern || 'single', item.intensity || 1);
+        break;
+      case 'gd_mirror_gate':
+        this.addMirrorGate(x, item.floor || 1, item.ceiling || 1, item.spikes || 1);
+        break;
       case 'gd_orb_line':
         for (let i = 0; i < count; i++) this.addOrbLane(x + i * 40, item.orb || 'orb_yellow', item.lane || 'mid');
         break;
@@ -255,6 +292,9 @@ export class ObstacleManager {
       case 'gd_secret_coin':
         this.addSecretCoin(x, item.y || CONFIG.GROUND_Y - 100);
         break;
+      case 'gd_heart':
+        this.addHeart(x, item.y || CONFIG.GROUND_Y - 145);
+        break;
       case 'PORTAL_SHIP': this.addPortal(x, CONFIG.GROUND_Y - 120, 'portal_ship'); break;
       case 'PORTAL_CUBE': this.addPortal(x, CONFIG.GROUND_Y - 120, 'portal_cube'); break;
       case 'PORTAL_BALL': this.addPortal(x, CONFIG.GROUND_Y - 120, 'portal_ball'); break;
@@ -262,6 +302,30 @@ export class ObstacleManager {
       case 'PORTAL_GRAVITY_DOWN': this.addPortal(x, CONFIG.GROUND_Y - 120, 'portal_gravity_down'); break;
       case 'LASER_WARNING': this.addLaserWarning(item.y || 200); break;
       case 'LASER_FIRE': /* Handled by CyberDemonBoss */ break;
+
+      // Raw types from Editor/JSON
+      case 'block': this.addBlock(x, item.y * 32); break;
+      case 'spike': this.addSpike(x, item.y * 32 + 32); break; // Spike is 36px high, align with grid bottom
+      case 'spike_down': this.addSpikeDown(x, item.y * 32); break;
+      case 'slope_right': this.addSlope(x, item.y * 32, 'up'); break;
+      case 'slope_left': this.addSlope(x, item.y * 32, 'down'); break;
+      case 'slope_top_right': /* Special handling for ceiling slopes if needed */ 
+        this.obstacles.push({ type: 'slope_up', x, y: item.y * 32, w: 32, h: 32, inactive: false, solid: true, surface: 'ceiling', inverted: true });
+        break;
+      case 'slope_top_left':
+        this.obstacles.push({ type: 'slope_down', x, y: item.y * 32, w: 32, h: 32, inactive: false, solid: true, surface: 'ceiling', inverted: true });
+        break;
+      case 'platform': this.obstacles.push({ type: 'block', x, y: item.y * 32, w: 32, h: 8, inactive: false, solid: true, surface: 'floor' }); break;
+      case 'orb_yellow': this.addOrb(x, item.y * 32, 'orb_yellow'); break;
+      case 'orb_green': this.addOrb(x, item.y * 32, 'orb_green'); break;
+      case 'orb_blue': this.addOrb(x, item.y * 32, 'orb_blue'); break;
+      case 'orb_red': this.addOrb(x, item.y * 32, 'orb_red'); break;
+      case 'portal_ship': this.addPortal(x, item.y * 32 - 24, 'portal_ship'); break;
+      case 'portal_cube': this.addPortal(x, item.y * 32 - 24, 'portal_cube'); break;
+      case 'portal_ball': this.addPortal(x, item.y * 32 - 24, 'portal_ball'); break;
+      case 'portal_gravity_up': this.addPortal(x, item.y * 32 - 24, 'portal_gravity_up'); break;
+      case 'portal_gravity_down': this.addPortal(x, item.y * 32 - 24, 'portal_gravity_down'); break;
+      case 'secret_coin': this.addSecretCoin(x, item.y * 32); break;
     }
   }
 
@@ -326,6 +390,50 @@ export class ObstacleManager {
   addPlatform(x, width = 3, height = 1) {
     const y = CONFIG.GROUND_Y - 36 * height;
     for (let i = 0; i < width; i++) this.addBlock(x + i * 36, y, 'floor');
+  }
+
+  addSlopeChain(x, pattern = 'up', length = 3) {
+    for (let i = 0; i < length; i++) {
+      const dir = pattern === 'zigzag' && i % 2 ? 'down' : 'up';
+      const y = CONFIG.GROUND_Y - 36 * (dir === 'up' ? i + 1 : Math.max(1, length - i));
+      this.addSlope(x + i * 46, y, dir);
+    }
+  }
+
+  addSpikeBlockMix(x, pattern = 'single', intensity = 1) {
+    const safeIntensity = Math.max(1, Math.min(4, intensity));
+    if (pattern === 'stairs') {
+      for (let i = 0; i < safeIntensity; i++) {
+        this.addFloorStack(x + i * 64, Math.min(3, i + 1));
+        this.addSpike(x + i * 64 + 42, CONFIG.GROUND_Y);
+      }
+      return;
+    }
+    if (pattern === 'teeth') {
+      for (let i = 0; i < safeIntensity + 1; i++) {
+        this.addSpike(x + i * 58, CONFIG.GROUND_Y);
+        if (i % 2 === 0) this.addSpikeDown(x + i * 58 + 26, 0);
+      }
+      return;
+    }
+    if (pattern === 'ceiling') {
+      for (let i = 0; i < safeIntensity; i++) {
+        this.addCeilingStack(x + i * 64, Math.min(3, safeIntensity - i));
+        this.addSpikeDown(x + i * 64 + 42, 0);
+      }
+      return;
+    }
+    this.addSpike(x, CONFIG.GROUND_Y);
+    this.addFloorStack(x + 58, Math.min(3, safeIntensity));
+  }
+
+  addMirrorGate(x, floorHeight = 1, ceilingHeight = 1, spikes = 1) {
+    this.addFloorStack(x, floorHeight);
+    this.addCeilingStack(x, ceilingHeight);
+    for (let i = 0; i < spikes; i++) {
+      this.addSpike(x + 72 + i * 58, CONFIG.GROUND_Y);
+      this.addSpikeDown(x + 102 + i * 58, 0);
+    }
   }
 
   addTunnel(x, width = 3, floorHeight = 1, ceilingHeight = 1) {
@@ -407,8 +515,17 @@ export class ObstacleManager {
   collidesWithPlayer(playerHitbox) {
     for (const o of this.obstacles) {
       if (o.inactive) continue;
+      // Skip collision checks for obstacles that are far off-screen to save CPU cycles on potato PCs
+      if (o.x < -100 || o.x > CONFIG.W + 100) continue;
 
-      if (o.type.startsWith('portal_') || o.type.startsWith('orb_')) {
+      if (o.type.startsWith('portal_')) {
+        // Portals act as vertical gates stretching from 0 to GROUND_Y so that players 
+        // in ship, ball, or reverse-gravity modes never fly over/under and miss them.
+        const portalHitbox = { x: o.x, y: 0, w: o.w, h: CONFIG.GROUND_Y };
+        if (intersects(playerHitbox, portalHitbox)) {
+          return { type: 'utility', obs: o };
+        }
+      } else if (o.type.startsWith('orb_')) {
         if (intersectsEllipse(playerHitbox, o)) {
           return { type: 'utility', obs: o };
         }
@@ -466,6 +583,9 @@ export class ObstacleManager {
     const isBoss = this.currentLevelIndex === 2;
 
     for (const o of this.obstacles) {
+      // Performance Optimization for potato PCs: skip drawing off-screen obstacles entirely
+      if (o.x < -150 || o.x > CONFIG.W + 150) continue;
+      if (o.inactive && !o.type.startsWith('portal_') && !o.type.startsWith('orb_')) continue;
       if (o.type === 'spike') {
         if (!o.variant && assets) o.variant = assets.getRandomSpikeKey();
         const spikeImg = assets?.get?.(o.variant || 'spike_01');
