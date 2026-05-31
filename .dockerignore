@@ -1,0 +1,15 @@
+.git
+.github
+.gemini
+.gitignore
+.venv
+__pycache__
+*.py
+*.json:Zone.Identifier
+*.py:Zone.Identifier
+*.md:Zone.Identifier
+Dockerfile
+nginx.conf
+.dockerignore
+recovery/
+.cache/

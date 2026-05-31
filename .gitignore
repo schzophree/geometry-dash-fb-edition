@@ -2,8 +2,6 @@
 .github
 .gemini
 .gitignore
-Dockerfile
-.dockerignore
 README.txt
 dashcube.zip
 README.md
