@@ -352,9 +352,9 @@ export class ObstacleManager {
 
   addPortal(x, y, type) {
     // Keep bottom aligned with the old portal height (86)
-    // w: 80, h: 80 (1:1 ratio)
-    const adjustedY = y + 6;
-    this.obstacles.push({ type, x, y: adjustedY, w: 80, h: 80, inactive: false });
+    // w: 256, h: 256 (1:1 ratio as requested by Dan)
+    const adjustedY = y - 170;
+    this.obstacles.push({ type, x, y: adjustedY, w: 256, h: 256, inactive: false });
   }
 
   addOrb(x, y, type) {
@@ -522,9 +522,12 @@ export class ObstacleManager {
       if (o.x < -100 || o.x > CONFIG.W + 100) continue;
 
       if (o.type.startsWith('portal_')) {
-        // Portals act as infinite vertical gates stretching from -1000 to 2000 so that players 
-        // in ship, ball, or reverse-gravity modes never fly over/under and miss them.
-        const portalHitbox = { x: o.x, y: -1000, w: o.w, h: 3000 };
+        // Portals act as infinite vertical gates stretching from -1000 to 2000.
+        // With a large 256px visual width, we focus the collision trigger in the center
+        // (width 32) so that the player triggers the portal transition exactly as they pass through it.
+        const triggerW = 32;
+        const triggerX = o.x + (o.w - triggerW) / 2;
+        const portalHitbox = { x: triggerX, y: -1000, w: triggerW, h: 3000 };
         if (intersects(playerHitbox, portalHitbox)) {
           return { type: 'utility', obs: o };
         }

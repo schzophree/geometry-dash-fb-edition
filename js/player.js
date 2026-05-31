@@ -52,12 +52,23 @@ export class Player {
         // Autopilot flies smoothly at the safe corridor!
         // In Boss level, we want to dodge lasers and stay in the middle (around y = 200)
         const targetY = CONFIG.H / 2 - 20;
-        if (this.y > targetY + 15) {
-          botJump = true;
-        } else if (this.y < targetY - 15) {
-          botJump = false;
-        } else {
-          botJump = Math.random() < 0.45; // Hover nicely!
+        
+        if (this.gravity === 1) {
+          if (this.y > targetY + 15) {
+            botJump = true;
+          } else if (this.y < targetY - 15) {
+            botJump = false;
+          } else {
+            botJump = Math.random() < 0.45; // Hover nicely!
+          }
+        } else { // Inverted gravity (-1)
+          if (this.y > targetY + 15) {
+            botJump = false; // Release jump to move UP in inverted gravity
+          } else if (this.y < targetY - 15) {
+            botJump = true; // Hold jump to move DOWN in inverted gravity
+          } else {
+            botJump = Math.random() < 0.55; // Hover nicely!
+          }
         }
       } else {
         const lookAhead = 150; // Increased lookahead to prevent late reactions

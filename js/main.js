@@ -1,10 +1,10 @@
 import { CONFIG, clamp, getLevel, intersects, syncCanvasLayout } from './config.js';
 import { perfSampleFrame, resetPerfSampling, getPerfConfig } from './perf.js';
 import { VisualEffects } from './visual-effects.js';
-import { AssetLoader, blendThemes, createShapes, createStars } from './assets.js';
+import { AssetLoader, blendThemes, createShapes, createStars } from './assets.js?v=2.2';
 import { AudioEngine } from './audio.js';
-import { Player } from './player.js';
-import { ObstacleManager } from './obstacles.js';
+import { Player } from './player.js?v=2.2';
+import { ObstacleManager } from './obstacles.js?v=2.2';
 import { FacebookChaser } from './facebook.js';
 import { GhostStatus } from './ghost.js';
 import { HUD } from './hud.js';
