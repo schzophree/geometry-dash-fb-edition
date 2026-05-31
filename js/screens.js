@@ -17,7 +17,8 @@ export class Screens {
     this.muteButton = document.getElementById('muteButton');
     this.deadScore = document.getElementById('deadScore');
     this.deadReason = document.getElementById('deadReason');
-    this.continueCheckpointButton = document.getElementById('continueCheckpointButton');
+    this.restartCheckpointButton = document.getElementById('restartCheckpointButton');
+    this.menuButtonDead = document.getElementById('menuButtonDead');
     this.checkpointFlash = document.getElementById('checkpointFlash');
   }
 
@@ -147,8 +148,8 @@ export class Screens {
     }
 
     if (this.deadScore) this.deadScore.textContent = `SCORE KAMU: ${Math.floor(score)}`;
-    if (this.continueCheckpointButton) {
-      this.continueCheckpointButton.hidden = !hasCheckpoint;
+    if (this.restartCheckpointButton) {
+      this.restartCheckpointButton.hidden = false;
     }
   }
 

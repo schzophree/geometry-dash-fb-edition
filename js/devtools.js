@@ -131,7 +131,6 @@
     injectStyles();
     createDevUI();
     setupGlobalHotkeys();
-    console.log("%c🔧 GD DevTools v2.0 dimuat. Tekan [Ctrl + Shift + E] untuk membuka editor.", "color: #00ff88; font-weight: bold; font-family: monospace;");
   }
 
   // ============================

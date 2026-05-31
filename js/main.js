@@ -147,13 +147,53 @@ window.reloadLevel = function () {
   obstacles.obstacles = [];
   obstacles.hearts = [];
 
+  // Copy level data to inject programmatically balanced hearts
+  const levelDataCopy = [...levelData];
+  const lvlIndex = window.currentLevelIndex;
+  let heartXs = [];
+  
+  if (lvlIndex === 0) { // Level 1
+    heartXs = [150, 320, 500, 680, 850, 1050, 1250, 1450];
+  } else if (lvlIndex === 1) { // Level 2
+    heartXs = [180, 360, 540, 720, 900, 1080, 1260, 1440, 1620, 1800];
+  } else if (lvlIndex === 2) { // Level 3 Boss
+    heartXs = [120, 240, 360, 480, 600, 720, 840, 960, 1080, 1200, 1320, 1440, 1560, 1680, 1800, 1920, 2040, 2160, 2280, 2400];
+  }
+
+  for (const hx of heartXs) {
+    // Check if there is already a heart nearby to avoid double spawning
+    const isNearby = levelDataCopy.some(o => o.type === 'heart' && Math.abs(o.x - hx) < 25);
+    if (!isNearby) {
+      levelDataCopy.push({ type: 'heart', x: hx, y: 7 }); // Melayang di udara (y = 7 grid unit)
+    }
+  }
+
+  // Cari semua koordinat x unik yang memiliki portal gravitasi (up/down)
+  const gravityXCoords = [...new Set(
+    levelDataCopy
+      .filter(o => {
+        const t = o.type.toLowerCase();
+        return t === 'portal_gravity_up' || t === 'portal_gravity_down';
+      })
+      .map(o => o.x)
+  )].sort((a, b) => a - b);
+
+  // Buat mapping dari x ke jenis portal gravitasi yang seimbang (selang-seling)
+  const gravityMapping = {};
+  let currentExpectedUp = true; // mulai dengan up (karena di awal player ada di lantai)
+  for (const x of gravityXCoords) {
+    gravityMapping[x] = currentExpectedUp ? 'portal_gravity_up' : 'portal_gravity_down';
+    currentExpectedUp = !currentExpectedUp; // balikkan untuk x berikutnya
+  }
+
   // Muat setiap objek dari editor ke ObstacleManager
   const TILE = 32; // Ukuran grid editor
-  for (const o of levelData) {
+  for (const o of levelDataCopy) {
     const px = o.x * TILE;
     const py = o.y * TILE;
+    const oType = o.type.toLowerCase();
 
-    switch (o.type) {
+    switch (oType) {
       case 'block':
         obstacles.obstacles.push({ type: 'block', x: px, y: py, w: TILE, h: TILE, inactive: false, solid: true, surface: 'floor' });
         break;
@@ -176,16 +216,40 @@ window.reloadLevel = function () {
       case 'orb_green':
       case 'orb_blue':
       case 'orb_red':
-        obstacles.obstacles.push({ type: o.type, x: px, y: py, w: TILE, h: TILE, inactive: false, primed: false });
+        obstacles.obstacles.push({ type: oType, x: px, y: py, w: TILE, h: TILE, inactive: false, primed: false });
         break;
       case 'portal_ship':
       case 'portal_cube':
-      case 'portal_ball':
-      case 'portal_gravity_up':
-      case 'portal_gravity_down':
-        // Align with editor: portals are offset by -0.75 GRID (24px) vertically
-        obstacles.obstacles.push({ type: o.type, x: px, y: py - 24, w: 46, h: 86, inactive: false });
+      case 'portal_ball': {
+        // Remap portal types per level agar gameplay seimbang:
+        // Level 1: Mayoritas cube, selingan ship singkat
+        // Level 2: Seimbang antara cube dan ship
+        // Level 3: Mayoritas ship untuk menghindari laser raja iblis
+        let portalType = oType;
+        
+        if (lvlIndex === 0) {
+          // Level 1: Ball→Cube, Ship tetap tapi pasangannya selalu kembali ke Cube
+          if (oType === 'portal_ball') portalType = 'portal_cube';
+          // portal_ship dan portal_cube tetap aslinya
+        } else if (lvlIndex === 1) {
+          // Level 2: Ball→Ship (variasi), tapi cube tetap supaya seimbang
+          if (oType === 'portal_ball') portalType = 'portal_ship';
+          // portal_ship dan portal_cube tetap aslinya
+        } else {
+          // Level 3 Boss: Semua portal non-ship menjadi ship
+          if (oType === 'portal_ball') portalType = 'portal_ship';
+          if (oType === 'portal_cube') portalType = 'portal_ship';
+        }
+        
+        obstacles.obstacles.push({ type: portalType, x: px, y: py - 24, w: 46, h: 86, inactive: false });
         break;
+      }
+      case 'portal_gravity_up':
+      case 'portal_gravity_down': {
+        const mappedType = gravityMapping[o.x] || oType;
+        obstacles.obstacles.push({ type: mappedType, x: px, y: py - 24, w: 46, h: 86, inactive: false });
+        break;
+      }
       case 'secret_coin':
         obstacles.obstacles.push({ type: 'secret_coin', x: px, y: py, w: 30, h: 30, inactive: false });
         break;
@@ -627,24 +691,22 @@ function updatePlaying(dt) {
   if (hitObs) {
     if (hitObs.type === 'utility') {
       const obs = hitObs.obs;
-      if (!utilityCollisionLock) {
-        if (obs.type.toLowerCase().startsWith('portal_')) {
+      if (obs.type.toLowerCase().startsWith('portal_')) {
+        console.log(`%c[Portal Hit] ${obs.type.toUpperCase()} at x=${Math.round(obs.x)} | Before: mode=${player.mode}, grav=${player.gravity}`, 'color: #00ffcc; font-weight: bold;');
+        handlePortal(obs.type);
+        obs.inactive = true;
+        console.log(`%c[Portal Effect Applied] After: mode=${player.mode}, grav=${player.gravity}`, 'color: #00ff88;');
+      } else if (!utilityCollisionLock && obs.type.toLowerCase().startsWith('orb_')) {
+        if (isJumpHeld || jumpBufferTimer > 0 || player.autoPilot) {
           utilityCollisionLock = true;
-          handlePortal(obs.type);
+          handleOrb(obs.type);
           obs.inactive = true;
-          // Very short lock for portals to allow rapid switching if needed
-          setTimeout(() => (utilityCollisionLock = false), 50); 
-        } else if (obs.type.startsWith('orb_')) {
-          if (isJumpHeld) {
-            utilityCollisionLock = true;
-            handleOrb(obs.type);
-            obs.inactive = true;
-            screenShake = Math.max(screenShake, 3);
-            beatFlash = 1;
-            setTimeout(() => (utilityCollisionLock = false), 150);
-          } else {
-            obs.primed = true;
-          }
+          jumpBufferTimer = 0; // Reset buffer to prevent immediate double jump
+          screenShake = Math.max(screenShake, 3);
+          beatFlash = 1;
+          setTimeout(() => (utilityCollisionLock = false), 150);
+        } else {
+          obs.primed = true;
         }
       }
     } else if (hitObs.type === 'springpad') {
@@ -682,24 +744,25 @@ function updatePlaying(dt) {
 }
 
 function handleOrb(type) {
+  const t = type.toLowerCase();
   // Disable all JUMP orbs (Yellow, Green, Red) for Boss Level as requested
   // Only Blue Orb (Gravity Switch) remains functional
-  if (currentLevelIndex === 2 && (type === 'orb_yellow' || type === 'orb_green' || type === 'orb_red')) {
+  if (currentLevelIndex === 2 && (t === 'orb_yellow' || t === 'orb_green' || t === 'orb_red')) {
     return;
   }
 
-  if (type === 'orb_yellow') {
+  if (t === 'orb_yellow') {
     player.jump(-14.2);
     VisualEffects.beatPulse(0.6);
-  } else if (type === 'orb_green') {
+  } else if (t === 'orb_green') {
     player.jump(-16.0);
     VisualEffects.beatPulse(1.0);
     screenShake = Math.max(screenShake, 4);
-  } else if (type === 'orb_blue') {
+  } else if (t === 'orb_blue') {
     player.jump(-12.0);
     player.gravity *= -1;
     VisualEffects.beatPulse(0.8);
-  } else if (type === 'orb_red') {
+  } else if (t === 'orb_red') {
     player.jump(-18.0);
     VisualEffects.beatPulse(0.9);
     screenShake = Math.max(screenShake, 5);
@@ -708,11 +771,11 @@ function handleOrb(type) {
 
 function handlePortal(type) {
   const t = type.toLowerCase();
-  if (t.includes('ship') && player.mode !== 'ship') player.setMode('ship');
-  else if (t.includes('cube') && player.mode !== 'cube') player.setMode('cube');
-  else if (t.includes('ball') && player.mode !== 'ball') player.setMode('ball');
-  else if (t.includes('gravity_up') && player.gravity !== -1) player.setGravity(-1);
-  else if (t.includes('gravity_down') && player.gravity !== 1) player.setGravity(1);
+  if (t.includes('ship')) player.setMode('ship');
+  else if (t.includes('cube')) player.setMode('cube');
+  else if (t.includes('ball')) player.setMode('ball');
+  else if (t.includes('gravity_up')) player.setGravity(-1);
+  else if (t.includes('gravity_down')) player.setGravity(1);
 }
 
 function handleLevelTransition() {
@@ -749,6 +812,16 @@ function handleLevelTransition() {
 
   const previousTheme = getLevel(currentLevelIndex).theme;
   currentLevelIndex = nextIndex;
+  window.currentLevelIndex = currentLevelIndex; // Update bridge index
+  
+  // Muat data level baru ke window.levelData
+  const musicEntry = (MUSIC_LIST || [])[currentLevelIndex];
+  if (musicEntry && musicEntry.levelData) {
+    window.levelData = musicEntry.levelData;
+  } else {
+    window.levelData = null;
+  }
+
   const level = getLevel(currentLevelIndex);
 
   if (level.name === 'BOSS') {
@@ -764,13 +837,45 @@ function handleLevelTransition() {
   levelTransitionFx = { label: level.label, name: level.name, started: performance.now(), duration: 2500 };
   screens.setTheme(level.theme);
   obstacles.reset();
+
+  // Muat ulang rintangan kustom untuk level baru
+  if (Array.isArray(window.levelData) && window.levelData.length > 0) {
+    window.reloadLevel();
+    
+    // Geser semua rintangan agar mulai muncul dari sisi kanan layar
+    // Cari posisi x minimum dari semua obstacle yang baru dimuat
+    let minX = Infinity;
+    for (const o of obstacles.obstacles) {
+      if (o.x < minX) minX = o.x;
+    }
+    for (const h of obstacles.hearts) {
+      if (h.x < minX) minX = h.x;
+    }
+    
+    // Offset semua obstacle supaya yang pertama muncul dari tepi kanan layar + buffer
+    if (minX < Infinity) {
+      const targetStartX = CONFIG.W + 100; // Mulai dari sedikit di luar layar kanan
+      const offset = targetStartX - minX;
+      for (const o of obstacles.obstacles) {
+        o.x += offset;
+      }
+      for (const h of obstacles.hearts) {
+        h.x += offset;
+      }
+    }
+  }
+
+  // Reset player ke mode cube dan gravitasi normal untuk level baru
+  player.setMode('cube');
+  player.setGravity(1);
+
   ghost.reset();
   cyberBoss.reset();
   audio.playLevel(currentLevelIndex, 0);
 }
 
 function applyDamage(reason, obs = null) {
-  if (player.isInvincible() || godMode) return;
+  if (player.isInvincible() || godMode || player.autoPilot) return;
   audio.playHitSfx();
   totalDeaths++;
   cyberBoss?.notifyPlayerDamaged?.();
@@ -841,6 +946,12 @@ function triggerLevelComplete() {
     audio.playBossCheckpointCue();
     VisualEffects.shake(20, 0.8);
     VisualEffects.triggerInvert(0.4);
+    
+    // Tampilkan tombol Produktif yang sangat mencolok!
+    const prodBtn = document.getElementById('productiveButton');
+    if (prodBtn) {
+      prodBtn.classList.remove('hidden');
+    }
   }
 
   completeInfo = { 
@@ -857,6 +968,12 @@ function triggerLevelComplete() {
 }
 
 function startGame({ fromCheckpoint = false, levelIndex = selectedLevel, clearCheckpoint = true } = {}) {
+  // Sembunyikan tombol Produktif jika ada
+  const prodBtn = document.getElementById('productiveButton');
+  if (prodBtn) {
+    prodBtn.classList.add('hidden');
+  }
+
   if (document.activeElement && typeof document.activeElement.blur === 'function') {
     document.activeElement.blur();
   }
@@ -951,6 +1068,11 @@ function returnToMenu() {
     screens.showStart(selectedLevel, assets.logo);
   });
   bgScroll = 0;
+  
+  const prodBtn = document.getElementById('productiveButton');
+  if (prodBtn) {
+    prodBtn.classList.add('hidden');
+  }
 }
 
 function spawnImpact(x, y, color, count) {
@@ -1067,10 +1189,10 @@ function drawScene(drawHud) {
       const yOff = p < 0.2 ? -50 * (1 - p / 0.2) : p > 0.8 ? 50 * ((p - 0.8) / 0.2) : 0;
       const alpha = p < 0.2 ? p / 0.2 : p > 0.8 ? 1 - (p - 0.8) / 0.2 : 1;
       ctx.fillStyle = `rgba(255,255,255,${alpha})`;
-      ctx.font = 'bold 48px Arial';
+      ctx.font = '40px Pusab, Impact, Arial';
       ctx.textAlign = 'center';
       ctx.fillText(levelTransitionFx.label, CONFIG.W / 2, CONFIG.H / 2 - 20 + yOff);
-      ctx.font = 'bold 24px Arial';
+      ctx.font = '18px Pusab, Impact, Arial';
       ctx.fillStyle = theme.primary;
       ctx.globalAlpha = alpha;
       ctx.fillText(levelTransitionFx.name, CONFIG.W / 2, CONFIG.H / 2 + 20 + yOff);
@@ -1119,27 +1241,27 @@ function drawScene(drawHud) {
     ctx.textAlign = 'center';
 
     if (completeInfo.levelName === 'BOSS') {
-      ctx.font = 'bold 32px Arial';
+      ctx.font = '28px Pusab, Impact, Arial';
       ctx.fillStyle = '#ff3333';
       ctx.fillText('KAMU BERHASIL MENAMATKAN', CONFIG.W / 2, CONFIG.H / 2 - 80);
-      ctx.font = 'bold 42px Arial';
+      ctx.font = '36px Pusab, Impact, Arial';
       ctx.fillStyle = '#ffffff';
       ctx.fillText('RAJA IBLIS FESNUK!', CONFIG.W / 2, CONFIG.H / 2 - 35);
     } else {
-      ctx.font = 'bold 54px Arial';
+      ctx.font = '48px Pusab, Impact, Arial';
       ctx.fillText('LEVEL CLEARED', CONFIG.W / 2, CONFIG.H / 2 - 40);
     }
 
-    ctx.font = 'bold 24px Arial';
+    ctx.font = '22px Pusab, Impact, Arial';
     ctx.fillStyle = theme.primary;
     ctx.fillText(`Final Score: ${completeInfo.score}`, CONFIG.W / 2, CONFIG.H / 2 + 25);
 
-    ctx.font = 'bold 18px Arial';
+    ctx.font = '16px Pusab, Impact, Arial';
     ctx.fillStyle = '#ff6666';
     ctx.fillText(`Total Deaths: ${completeInfo.deaths}`, CONFIG.W / 2, CONFIG.H / 2 + 60);
 
     ctx.fillStyle = '#aaa';
-    ctx.font = '16px Arial';
+    ctx.font = '14px Pusab, Impact, Arial';
     ctx.fillText('Click anywhere to Return to Menu', CONFIG.W / 2, CONFIG.H / 2 + 100);
   }
 
@@ -1288,17 +1410,25 @@ function bindUI() {
     screens.showPause({ score, song: audio.currentSongName(), muted: isMuted });
   });
 
-  document.getElementById('continueCheckpointButton')?.addEventListener('click', () => {
+  document.getElementById('restartCheckpointButton')?.addEventListener('click', () => {
     if (progressCheckpoint.saved) {
       resumeFromProgressCheckpoint();
     } else if (checkpoint) {
       startGame({ fromCheckpoint: true });
+    } else {
+      startGame({ levelIndex: currentLevelIndex, clearCheckpoint: true });
     }
   });
 
-  document.getElementById('restartButton')?.addEventListener('click', () => {
-    startGame({ levelIndex: currentLevelIndex, clearCheckpoint: true });
-  });
+  document.getElementById('menuButtonDead')?.addEventListener('click', returnToMenu);
+
+  const prodBtn = document.getElementById('productiveButton');
+  if (prodBtn) {
+    const stopProp = (e) => e.stopPropagation();
+    prodBtn.addEventListener('click', stopProp);
+    prodBtn.addEventListener('pointerdown', stopProp);
+    prodBtn.addEventListener('touchstart', stopProp);
+  }
 
   window.addEventListener('keydown', (e) => {
     // Secret Cheat: type 'moonchi'

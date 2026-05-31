@@ -1,7 +1,7 @@
-.git                                                                                                                                                                
-.github                                                                                                                                                             
-.gemini                                                                                                                                                             
-.gitignore                                                                                                                                                          
+.git
+.github
+.gemini
+.gitignore
 Dockerfile
 .dockerignore
 README.txt
@@ -15,4 +15,6 @@ plan.assets/js/
 screenshot/
 UPDATE_GDF_V1.2.beta.md
 UPDATE_GDF_V1.3.
-.cache/*:Zone.Identifier
+.cache/
+*:Zone.Identifier
+recovery/

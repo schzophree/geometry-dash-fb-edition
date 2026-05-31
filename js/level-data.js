@@ -304,7 +304,7 @@ function buildBoss() {
 
   // Boss intro actions
   add(list, 2.5, 'PORTAL_SHIP', { difficulty: 1 });
-  add(list, 3.5, 'BOSS_APPEAR', { text: 'ACOLYTE OF CORRUPTION', difficulty: 2 });
+  add(list, 3.5, 'BOSS_APPEAR', { text: '', difficulty: 2 });
   add(list, 8.0, 'PORTAL_SHIP', { difficulty: 4 });
 
   // Gravity portal triggers
@@ -349,8 +349,10 @@ function buildBoss() {
 
     // Laser & Pillar hazards
     if (tick % 14 === 0) add(list, time + 0.05, 'PILLAR_SPAWN', { position: tick % 28 === 0 ? 'top' : 'bottom', difficulty });
-    if (tick % 16 === 8) add(list, time + 0.1, 'LASER_WARNING', { difficulty });
-    if (tick % 16 === 11) add(list, time + 0.1, 'LASER_FIRE', { duration: difficulty > 70 ? 1.3 : 1.0, difficulty });
+    if (tick % 16 === 8) {
+      add(list, time + 0.1, 'LASER_WARNING', { difficulty });
+      add(list, time + 1.45, 'LASER_FIRE', { duration: difficulty > 70 ? 1.3 : 1.0, difficulty });
+    }
 
     // Add a random gap of 0.3-0.5s
     seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;

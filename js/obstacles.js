@@ -351,7 +351,10 @@ export class ObstacleManager {
   }
 
   addPortal(x, y, type) {
-    this.obstacles.push({ type, x, y, w: 46, h: 86, inactive: false });
+    // Keep bottom aligned with the old portal height (86)
+    // w: 80, h: 80 (1:1 ratio)
+    const adjustedY = y + 6;
+    this.obstacles.push({ type, x, y: adjustedY, w: 80, h: 80, inactive: false });
   }
 
   addOrb(x, y, type) {
@@ -519,9 +522,9 @@ export class ObstacleManager {
       if (o.x < -100 || o.x > CONFIG.W + 100) continue;
 
       if (o.type.startsWith('portal_')) {
-        // Portals act as vertical gates stretching from 0 to GROUND_Y so that players 
+        // Portals act as infinite vertical gates stretching from -1000 to 2000 so that players 
         // in ship, ball, or reverse-gravity modes never fly over/under and miss them.
-        const portalHitbox = { x: o.x, y: 0, w: o.w, h: CONFIG.GROUND_Y };
+        const portalHitbox = { x: o.x, y: -1000, w: o.w, h: 3000 };
         if (intersects(playerHitbox, portalHitbox)) {
           return { type: 'utility', obs: o };
         }
@@ -759,19 +762,45 @@ export class ObstacleManager {
         ctx.restore();
       } else if (o.type.startsWith('portal_')) {
         const portalType = o.type.replace('portal_', '');
-        const frontKey = `portal_front_${portalType}`;
-        const backKey = `portal_back_${portalType}`;
+        const sheetImg = assets?.get?.('portals_spritesheet');
         
-        const frontImg = assets?.get?.(frontKey);
-        const backImg = assets?.get?.(backKey);
-        
-        if (backImg) {
-          ctx.drawImage(backImg, o.x, o.y, o.w, o.h);
-        }
-        
-        if (frontImg) {
-          ctx.drawImage(frontImg, o.x, o.y, o.w, o.h);
-        } else if (!backImg) {
+        if (sheetImg) {
+          // Color sequence map:
+          // 0: ship (Pink)
+          // 1: cube (Green)
+          // 2: ball (Orange)
+          // 3: gravity_up (Blue)
+          // 4: gravity_down (Yellow)
+          const PORTAL_INDICES = {
+            'ship': 0,
+            'cube': 1,
+            'ball': 2,
+            'gravity_up': 3,
+            'gravity_down': 4
+          };
+          
+          const index = PORTAL_INDICES[portalType];
+          if (index !== undefined) {
+            const sliceW = sheetImg.width / 5;
+            const sliceH = sheetImg.height;
+            
+            // Enable smooth scaling specifically for portals so HD assets look premium
+            const oldSmoothing = ctx.imageSmoothingEnabled;
+            ctx.imageSmoothingEnabled = true;
+            
+            ctx.drawImage(
+              sheetImg,
+              index * sliceW, 0, sliceW, sliceH,
+              o.x, o.y, o.w, o.h
+            );
+            
+            ctx.imageSmoothingEnabled = oldSmoothing;
+          } else {
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 4;
+            ctx.strokeRect(o.x, o.y, o.w, o.h);
+          }
+        } else {
           ctx.strokeStyle = '#fff';
           ctx.lineWidth = 4;
           ctx.strokeRect(o.x, o.y, o.w, o.h);

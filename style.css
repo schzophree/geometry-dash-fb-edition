@@ -479,3 +479,58 @@ button { font: inherit; letter-spacing: 0; }
   .level-choice { min-width: 78px; font-size: 13px; }
   .start-button { min-width: 160px; }
 }
+
+[hidden], .hidden {
+  display: none !important;
+}
+
+/* Tombol Produktif Premium & Mencolok */
+.productive-btn {
+  position: absolute;
+  left: 50%;
+  top: 84%;
+  transform: translate(-50%, -50%);
+  display: inline-block;
+  padding: 16px 36px;
+  font-family: 'Pusab', 'Impact', sans-serif;
+  font-size: 26px;
+  font-weight: bold;
+  text-transform: uppercase;
+  text-decoration: none;
+  color: #ffffff;
+  background: linear-gradient(45deg, #1877f2, #00f2fe, #1877f2);
+  background-size: 200% auto;
+  border: 3px solid #ffffff;
+  border-radius: 50px;
+  box-shadow: 0 0 25px rgba(24, 119, 242, 0.7), 0 0 50px rgba(0, 242, 254, 0.4), inset 0 0 15px rgba(255, 255, 255, 0.5);
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.6);
+  cursor: pointer;
+  z-index: 999;
+  animation: pulseGlow 1.8s infinite alternate, shimmer 3s linear infinite;
+  transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275), filter 0.2s ease, box-shadow 0.2s ease;
+}
+
+.productive-btn:hover {
+  transform: translate(-50%, -50%) scale(1.12);
+  filter: brightness(1.25);
+  box-shadow: 0 0 40px rgba(24, 119, 242, 0.9), 0 0 80px rgba(0, 242, 254, 0.7), inset 0 0 20px #ffffff;
+}
+
+.productive-btn:active {
+  transform: translate(-50%, -50%) scale(0.95);
+}
+
+@keyframes pulseGlow {
+  0% {
+    box-shadow: 0 0 20px rgba(24, 119, 242, 0.6), 0 0 40px rgba(0, 242, 254, 0.3), inset 0 0 10px rgba(255, 255, 255, 0.4);
+  }
+  100% {
+    box-shadow: 0 0 35px rgba(24, 119, 242, 0.9), 0 0 70px rgba(0, 242, 254, 0.6), inset 0 0 20px rgba(255, 255, 255, 0.6);
+  }
+}
+
+@keyframes shimmer {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}

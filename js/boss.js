@@ -86,16 +86,47 @@ export class CyberDemonBoss {
   }
 
   update(dt, audioTime, beatFlash, playerHitbox, songProgress = 0) {
+    // Always update active explosion particles
+    for (const p of this.explosionParticles) {
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.life -= 0.018 * dt;
+    }
+    this.explosionParticles = this.explosionParticles.filter(p => p.life > 0);
+
     if (this.isDefeated) {
-      for (const p of this.explosionParticles) {
-        p.x += p.vx * dt;
-        p.y += p.vy * dt;
-        p.life -= 0.015 * dt;
-      }
-      this.explosionParticles = this.explosionParticles.filter(p => p.life > 0);
+      // Rapidly shrink scale on defeat
+      this.scale = Math.max(0, this.scale - 0.025 * dt);
       return;
     }
+
     const seconds = dt / 60;
+
+    // Spawn cascading mini-explosions popping off all over the boss's body near the end of the song
+    if (songProgress >= 0.94) {
+      if (Math.random() < 0.24 * dt) {
+        const offsetX = (Math.random() - 0.5) * 200 * this.scale;
+        const offsetY = (Math.random() - 0.5) * 220 * this.scale;
+        const count = 5 + Math.floor(Math.random() * 8);
+        
+        for (let i = 0; i < count; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const speed = 2 + Math.random() * 8;
+          this.explosionParticles.push({
+            x: this.x + offsetX,
+            y: this.y + offsetY,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            size: 3 + Math.random() * 6,
+            life: 1.0,
+            color: Math.random() > 0.4 ? '#ff3333' : '#ffffff'
+          });
+        }
+        
+        // Add dynamic screenshake feedback for each mini-explosion
+        this.pendingShake = Math.max(this.pendingShake, 2.5);
+      }
+    }
     this.lastAudioTime = audioTime;
     this.glowIntensity = Math.max(this.glowIntensity * 0.9, beatFlash);
     this.hitFlash = Math.max(0, this.hitFlash - 0.08 * dt);
@@ -319,6 +350,21 @@ export class CyberDemonBoss {
     if (this.scale > 0.02) this.drawBoss(ctx, assets, theme, beatFlash, frame);
     this.drawAttacks(ctx, assets, theme, playerHitbox, frame);
     this.drawBanner(ctx, theme);
+    this.drawExplosions(ctx);
+  }
+
+  drawExplosions(ctx) {
+    for (const p of this.explosionParticles) {
+      ctx.save();
+      ctx.globalAlpha = p.life;
+      ctx.fillStyle = p.color;
+      ctx.shadowColor = p.color;
+      ctx.shadowBlur = 10;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
   }
 
   drawMemeOverlay(ctx, assets) {

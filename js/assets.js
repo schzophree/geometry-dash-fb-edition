@@ -70,6 +70,37 @@ function removeNeutralMatte(img) {
   return canvas;
 }
 
+function removeBlackMatte(img) {
+  const canvas = document.createElement('canvas');
+  canvas.width = img.naturalWidth || img.width;
+  canvas.height = img.naturalHeight || img.height;
+
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img, 0, 0);
+
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const data = imageData.data;
+
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    const a = data[i + 3];
+    
+    // Detect solid black or the custom background color #1e141e (R=30, G=20, B=30)
+    const isBlack = r < 12 && g < 12 && b < 12;
+    const isCustomBg = r >= 26 && r <= 34 && g >= 16 && g <= 24 && b >= 26 && b <= 34;
+
+    if (a > 0 && (isBlack || isCustomBg)) {
+      data[i + 3] = 0; // Make transparent
+    }
+  }
+
+  ctx.putImageData(imageData, 0, 0);
+  return canvas;
+}
+
+
 export class AssetLoader {
   constructor() {
     this.images = new Map();
@@ -85,7 +116,6 @@ export class AssetLoader {
     const coreList = [
       { key: 'logo', src: ['assets/ui/loading_logo.png'] },
       { key: 'overlay1', src: ['assets/images/overlays/overlay-fokus-coding-scroll-fesnuk.png'] },
-      { key: 'bossCyberDemon', src: ['assets/images/boss/cyber-demon-fb.png', 'assets/images/boss/raja_fesnuk.png'], removeMatte: true },
       { key: 'boss_sheet', src: ['assets/images/boss/monstersprite.png'] },
       { key: 'player_cube', src: ['assets/images/player/characters/player.png'] },
       { key: 'player_ship', src: ['assets/images/player/ship/ship_01_001.png'] },
@@ -93,6 +123,7 @@ export class AssetLoader {
       { key: 'secret_coin', src: ['assets/images/coins/secretCoin_01_001.png'] },
       { key: 'decor_cloud', src: ['assets/images/decorations/clouds/CloudDecor01.png'] },
       { key: 'decor_vine', src: ['assets/images/decorations/vines/VineDecor01.png'] },
+      { key: 'fb_monster', src: ['assets/images/enemy/fb_monster.png'] },
     ];
 
     // Load meme overlays
@@ -158,6 +189,7 @@ export class AssetLoader {
       { key: 'portal_back_ball', src: ['assets/images/ui/portals/portal_03_back_001.png'], removeMatte: true },
       { key: 'portal_back_gravity_down', src: ['assets/images/ui/portals/portal_05_back_001.png'], removeMatte: true },
       { key: 'portal_back_gravity_up', src: ['assets/images/ui/portals/portal_06_back_001.png'], removeMatte: true },
+      { key: 'portals_spritesheet', src: ['assets/images/ui/portals/portals_spritesheet.png'], removeMatte: 'black' },
       { key: 'orb_yellow', src: ['assets/images/orbs/ring_01_001.png'] },
       { key: 'orb_blue', src: ['assets/images/orbs/ring_02_001.png'] },
       { key: 'orb_green', src: ['assets/images/orbs/ring_03_001.png'] },
@@ -178,7 +210,12 @@ export class AssetLoader {
         try {
           const img = await loadImageWithFallback(item.src);
           if (img) {
-            const finalImg = item.removeMatte ? removeNeutralMatte(img) : img;
+            let finalImg = img;
+            if (item.removeMatte === 'black') {
+              finalImg = removeBlackMatte(img);
+            } else if (item.removeMatte) {
+              finalImg = removeNeutralMatte(img);
+            }
             this.images.set(item.key, finalImg);
             if (item.key === 'logo') this.logo = finalImg;
           } else {
@@ -274,11 +311,34 @@ export class AssetLoader {
     }
 
     if (player.isInvincible()) {
+      // 1. Kedip warna merah lembut di bagian dalam player
       ctx.globalCompositeOperation = 'source-atop';
-      ctx.globalAlpha = 0.28 + Math.sin(performance.now() * 0.02) * 0.22;
-      ctx.fillStyle = '#ff4444';
+      ctx.globalAlpha = 0.35 + Math.sin(performance.now() * 0.025) * 0.15;
+      ctx.fillStyle = '#ff0033';
       ctx.fillRect(-pSize / 2, -pSize / 2, pSize, pSize);
       ctx.globalCompositeOperation = 'source-over';
+
+      // 2. Glow / Outline merah di luar player mengikuti lekukan bentuknya
+      ctx.save();
+      ctx.globalAlpha = 0.72 + Math.sin(performance.now() * 0.025) * 0.28;
+      ctx.strokeStyle = '#ff0033';
+      ctx.lineWidth = 3.5 + Math.sin(performance.now() * 0.025) * 1.5;
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+
+      if (player.mode === 'cube') {
+        ctx.strokeRect(-pSize / 2, -pSize / 2, pSize, pSize);
+      } else if (player.mode === 'ball') {
+        ctx.beginPath();
+        ctx.arc(0, 0, pSize / 2, 0, Math.PI * 2);
+        ctx.stroke();
+      } else if (player.mode === 'ship') {
+        // Lingkaran aura/shield merah di sekeliling ship agar terlihat premium dan natural
+        ctx.beginPath();
+        ctx.arc(0, 0, pSize * 0.72, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.restore();
     }
 
     ctx.restore();

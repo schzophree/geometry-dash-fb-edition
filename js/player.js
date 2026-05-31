@@ -46,29 +46,48 @@ export class Player {
     // Auto Pilot Logic
     let botJump = false;
     if (this.autoPilot) {
-      const lookAhead = 120; // pixels to look ahead
       const pb = this.hitbox();
-      
-      for (const obs of obstacles) {
-        if (obs.inactive) continue;
-        
-        const dist = obs.x - (pb.x + pb.w);
-        if (dist > -20 && dist < lookAhead) {
-          // Dangerous obstacles
-          if (obs.type === 'spike' || obs.type === 'block' || obs.type.startsWith('slope_')) {
-            // Only jump if obstacle is in our path
-            const willHit = (this.gravity === 1 && obs.y < pb.y + pb.h + 20) || 
-                            (this.gravity === -1 && obs.y + (obs.h || 36) > pb.y - 20);
-            if (willHit) {
-              botJump = true;
-              break;
+
+      if (this.mode === 'ship') {
+        // Autopilot flies smoothly at the safe corridor!
+        // In Boss level, we want to dodge lasers and stay in the middle (around y = 200)
+        const targetY = CONFIG.H / 2 - 20;
+        if (this.y > targetY + 15) {
+          botJump = true;
+        } else if (this.y < targetY - 15) {
+          botJump = false;
+        } else {
+          botJump = Math.random() < 0.45; // Hover nicely!
+        }
+      } else {
+        const lookAhead = 150; // Increased lookahead to prevent late reactions
+        for (const obs of obstacles) {
+          if (obs.inactive) continue;
+          
+          const dist = obs.x - (pb.x + pb.w);
+          const obsType = obs.type.toLowerCase();
+          
+          if (dist > -25 && dist < lookAhead) {
+            // Dangerous obstacles
+            if (obsType === 'spike' || obsType === 'block' || obsType.startsWith('slope_') || obsType === 'laser' || obsType === 'laser_warning') {
+              // Only jump if obstacle is in our vertical path
+              const willHit = (this.gravity === 1 && obs.y < pb.y + pb.h + 20) || 
+                              (this.gravity === -1 && obs.y + (obs.h || 32) > pb.y - 20);
+              if (willHit) {
+                // If we are close, trigger jump/gravity change
+                if (dist < 80) {
+                  botJump = true;
+                  break;
+                }
+              }
             }
-          }
-          // Orbs
-          if (obs.type.startsWith('orb_')) {
-            if (dist < 10) { // Hit orb when very close
-              botJump = true;
-              break;
+            
+            // Orbs
+            if (obsType.startsWith('orb_')) {
+              if (dist < 15) { // Hit orb when very close
+                botJump = true;
+                break;
+              }
             }
           }
         }

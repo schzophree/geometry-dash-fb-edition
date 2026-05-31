@@ -90,7 +90,9 @@ export const CONFIG = {
     'overlay-rust-10-jam-vibe-coder.png', 'overlay-scroll-bentar-ah.png',
     'overlay-skripsi-frieren.png', 'overlay-sql-select-fesnuk.png',
     'overlay-token-habis-llm.png', 'overlay-web-desa-kumparan.png',
-    'overlay-website-100rb.png', 'overlay-whatsapp-vscode-panda.png'
+    'overlay-website-100rb.png', 'overlay-whatsapp-vscode-panda.png',
+    'overlay-perusahaan-pake-xyz.png', 'overlay-sabung-js-php.png',
+    'overlays-pecut-ai.png'
   ],
 
   ghost: {
